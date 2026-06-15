@@ -31,8 +31,8 @@ venv/
 env/
 ENV/
 
-# ===== 项目特定 =====
-data/
+# ===== 项目特定(运行时数据,不入库) =====
+/data/
 seed/*
 !seed/*.default.json
 !seed/.gitkeep
