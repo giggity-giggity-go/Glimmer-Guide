@@ -1,0 +1,15 @@
+[project]
+# 是否开启遥测
+enable_telemetry = false
+
+[UI]
+# 主题
+name = "研途萤火"
+default_theme = "light"
+description = "个人考研智能体 · 研招网信息查询 + 资料语义检索"
+
+# 聊天历史
+chat_profiles_section_name = "会话"
+
+[meta]
+generated_by = "chainlit"
