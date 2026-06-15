@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yantu"
+version = "0.1.0"
+description = "研途萤火 - 个人考研智能体"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "steven"}]
+requires-python = ">=3.10"
+
+dependencies = [
+    # ===== Agent / LLM =====
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+
+    # ===== Web UI =====
+    "chainlit>=1.0.0",
+
+    # ===== 爬虫 =====
+    "scrapling>=0.3.0",
+    "httpx>=0.27.0",
+
+    # ===== 向量检索 =====
+    "chromadb>=0.5.0",
+    "sentence-transformers>=3.0.0",
+
+    # ===== 存储 =====
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.5.0",
+
+    # ===== MCP =====
+    "mcp>=1.0.0",
+
+    # ===== 工具 =====
+    "pypdf>=4.0.0",
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+yantu = "yantu.ui.app:main"
+yantu-mcp = "yantu.mcp.server:main"
+yantu-ingest = "scripts.ingest_seed:main"
+yantu-chat = "scripts.chat:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["yantu*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
