@@ -29,7 +29,7 @@ def _get_model() -> SentenceTransformer:
         cache_folder=str(cache),
         device="cpu",  # bge-small CPU 跑得动,GPU 没必要
     )
-    logger.info(f"Model loaded, dim={model.get_sentence_embedding_dimension()}")
+    logger.info(f"Model loaded, dim={model.get_embedding_dimension()}")
     return model
 
 
