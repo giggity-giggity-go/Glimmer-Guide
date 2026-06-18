@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>⚙️ 设置 · 研途萤火</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-alt: #fafbfc;
+      --border: #d0d7de;
+      --border-strong: #afb8c1;
+      --text: #1f2328;
+      --text-muted: #57606a;
+      --accent: #0969da;
+      --accent-hover: #0860c7;
+      --danger: #cf222e;
+      --shadow: 0 1px 3px rgba(31, 35, 40, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg-alt);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      line-height: 1.5;
+    }
+    header {
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      flex: 1;
+    }
+    header a.back {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 14px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      transition: background 0.1s;
+    }
+    header a.back:hover { background: var(--bg-alt); }
+    main {
+      max-width: 760px;
+      margin: 24px auto;
+      padding: 0 24px 80px;
+    }
+    form {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px 28px;
+      box-shadow: var(--shadow);
+    }
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px 20px 20px;
+      margin: 0 0 20px 0;
+    }
+    legend {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      padding: 0 8px;
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin: 10px 0;
+      flex-wrap: wrap;
+    }
+    .row label {
+      flex: 0 0 120px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .row .ctrl { flex: 1; min-width: 0; }
+    input[type="text"],
+    input[type="number"],
+    input[type="month"],
+    input[type="date"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 6px 10px;
+      font-size: 13.5px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: inherit;
+    }
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+    }
+    .radio-group {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .radio-group label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+    .tag-input-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--bg);
+      min-height: 38px;
+      align-items: center;
+    }
+    .tag-input-wrap:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      background: #ddf4ff;
+      color: #0969da;
+      border-radius: 12px;
+      font-size: 12.5px;
+    }
+    .tag button {
+      border: none;
+      background: transparent;
+      color: #0969da;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    .tag input {
+      border: none;
+      outline: none;
+      padding: 3px 4px;
+      font-size: 13px;
+      min-width: 100px;
+      flex: 1;
+      background: transparent;
+    }
+    .clear-btn {
+      margin-left: 8px;
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .clear-btn:hover { background: var(--bg-alt); }
+    .actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      margin-top: 8px;
+    }
+    button.primary {
+      padding: 8px 22px;
+      background: var(--accent);
+      color: #fff;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    button.primary:hover { background: var(--accent-hover); }
+    button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.secondary {
+      padding: 8px 18px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1f2328;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+    #toast.error { background: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/" class="back">← 返回聊天</a>
+    <h1>⚙️ 设置 · 用户画像</h1>
+  </header>
+  <main>
+    <form id="profile-form">
+      <!-- 个人信息 -->
+      <fieldset>
+        <legend>个人信息</legend>
+
+        <div class="row">
+          <label for="exam_year">考研年份</label>
+          <div class="ctrl">
+            <input type="number" id="exam_year" name="personal.exam_year" min="2024" max="2030" required />
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="name">昵称</label>
+          <div class="ctrl">
+            <input type="text" id="name" name="personal.name" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label>学习方式</label>
+          <div class="ctrl">
+            <div class="radio-group" data-field="personal.study_mode">
+              <label><input type="radio" name="personal.study_mode" value="全日制" /> 全日制</label>
+              <label><input type="radio" name="personal.study_mode" value="非全日制" /> 非全日制</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>学位类型</label>
+          <div class="ctrl">
+            <div class="radio-group" data-field="personal.degree_type">
+              <label><input type="radio" name="personal.degree_type" value="学硕" /> 学硕</label>
+              <label><input type="radio" name="personal.degree_type" value="专硕" /> 专硕</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="target_discipline_code">目标学科代码</label>
+          <div class="ctrl">
+            <input type="text" id="target_discipline_code" name="personal.target_discipline_code" placeholder="如 095136" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label>目标院校</label>
+          <div class="ctrl">
+            <div class="tag-input-wrap" data-field="personal.target_schools" data-list="true">
+              <input type="text" placeholder="按 Enter 添加院校" />
+            </div>
+            <div class="hint">支持多个,Enter 添加,点 × 删除</div>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 已知分数 -->
+      <fieldset>
+        <legend>已知分数</legend>
+
+        <div class="row">
+          <label for="politics">政治 (0-100)</label>
+          <div class="ctrl">
+            <input type="number" id="politics" name="scores.politics" min="0" max="100" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="english_2">英语二 (0-100)</label>
+          <div class="ctrl">
+            <input type="number" id="english_2" name="scores.english_2" min="0" max="100" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="math">数学 (0-150)</label>
+          <div class="ctrl">
+            <input type="number" id="math" name="scores.math" min="0" max="150" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="specialty_1">业务课一 (0-150)</label>
+          <div class="ctrl">
+            <input type="number" id="specialty_1" name="scores.specialty_1" min="0" max="150" />
+            <button type="button" class="clear-btn" data-clear="scores.specialty_1">清空</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="specialty_2">业务课二 (0-150)</label>
+          <div class="ctrl">
+            <input type="number" id="specialty_2" name="scores.specialty_2" min="0" max="150" />
+            <button type="button" class="clear-btn" data-clear="scores.specialty_2">清空</button>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 偏好 -->
+      <fieldset>
+        <legend>偏好</legend>
+
+        <div class="row">
+          <label>
+            <input type="checkbox" id="avoid_math" name="preferences.avoid_math" />
+            避开数学
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            <input type="checkbox" id="avoid_985" name="preferences.avoid_985" />
+            排除 985
+          </label>
+        </div>
+
+        <div class="row">
+          <label>是否要 211</label>
+          <div class="ctrl">
+            <div class="radio-group" data-field="preferences.want_211">
+              <label><input type="radio" name="preferences.want_211" value="true" /> 希望 211</label>
+              <label><input type="radio" name="preferences.want_211" value="false" /> 不要 211</label>
+              <label><input type="radio" name="preferences.want_211" value="null" /> 随便</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>业务课关键词</label>
+          <div class="ctrl">
+            <div class="tag-input-wrap" data-field="preferences.specialty_keywords" data-list="true">
+              <input type="text" placeholder="按 Enter 添加关键词" />
+            </div>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 地区 -->
+      <fieldset>
+        <legend>地区</legend>
+
+        <div class="row">
+          <label>偏好地区</label>
+          <div class="ctrl">
+            <div class="tag-input-wrap" data-field="regions.preferred" data-list="true">
+              <input type="text" placeholder="按 Enter 添加地区" />
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>可接受地区</label>
+          <div class="ctrl">
+            <div class="tag-input-wrap" data-field="regions.acceptable" data-list="true">
+              <input type="text" placeholder="按 Enter 添加地区" />
+            </div>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 时间轴 -->
+      <fieldset>
+        <legend>时间轴</legend>
+
+        <div class="row">
+          <label for="registration">预报名时间</label>
+          <div class="ctrl">
+            <input type="month" id="registration" name="timeline.registration" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="online_confirm">网上确认时间</label>
+          <div class="ctrl">
+            <input type="month" id="online_confirm" name="timeline.online_confirm" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="preliminary">初试时间</label>
+          <div class="ctrl">
+            <input type="date" id="preliminary" name="timeline.preliminary" />
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="retest">复试时间</label>
+          <div class="ctrl">
+            <input type="month" id="retest" name="timeline.retest" />
+          </div>
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <button type="button" class="secondary" id="reset-default">重置默认值</button>
+        <button type="submit" class="primary" id="save-btn">💾 保存</button>
+      </div>
+    </form>
+  </main>
+
+  <div id="toast"></div>
+
+  <!-- 当前 profile 数据,后端替换下方占位符 -->
+  <script id="profile-data" type="application/json">__PROFILE_JSON__</script>
+
+  <script>
+    // ============== 工具 ==============
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const toast = (msg, isError = false) => {
+      const el = $('#toast');
+      el.textContent = msg;
+      el.classList.toggle('error', isError);
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2200);
+    };
+
+    // ============== 预填 ==============
+    const PROFILE = JSON.parse($('#profile-data').textContent);
+
+    function fillScalars(profile) {
+      // 普通 input: name="a.b" → profile[a][b]
+      $$('input[name]:not([type=radio]):not([type=checkbox])').forEach((el) => {
+        const path = el.name.split('.');
+        let v = profile;
+        for (const k of path) v = v ? v[k] : undefined;
+        if (v === null || v === undefined) {
+          el.value = '';
+        } else {
+          el.value = String(v);
+        }
+      });
+      // checkbox
+      $$('input[type=checkbox][name]').forEach((el) => {
+        const path = el.name.split('.');
+        let v = profile;
+        for (const k of path) v = v ? v[k] : undefined;
+        el.checked = !!v;
+      });
+      // radio
+      $$('input[type=radio][name]').forEach((el) => {
+        const path = el.name.split('.');
+        let v = profile;
+        for (const k of path) v = v ? v[k] : undefined;
+        // want_211 三态特殊处理
+        if (el.name === 'preferences.want_211') {
+          const target = v === null || v === undefined ? 'null' : String(v);
+          if (el.value === target) el.checked = true;
+        } else {
+          if (String(v) === el.value) el.checked = true;
+        }
+      });
+    }
+
+    function fillListFields(profile) {
+      $$('[data-field][data-list="true"]').forEach((wrap) => {
+        const path = wrap.dataset.field.split('.');
+        let v = profile;
+        for (const k of path) v = v ? v[k] : undefined;
+        const items = Array.isArray(v) ? v : [];
+        items.forEach((item) => addChip(wrap, item));
+      });
+    }
+
+    function addChip(wrap, text) {
+      const chip = document.createElement('span');
+      chip.className = 'tag';
+      chip.textContent = text;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.onclick = () => chip.remove();
+      chip.appendChild(x);
+      const input = wrap.querySelector('input');
+      wrap.insertBefore(chip, input);
+    }
+
+    // ============== Tag input 行为 ==============
+    $$('[data-field][data-list="true"] input').forEach((inp) => {
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const v = inp.value.trim();
+          if (!v) return;
+          addChip(inp.parentElement, v);
+          inp.value = '';
+        } else if (e.key === 'Backspace' && !inp.value) {
+          // 删除最后一个 chip
+          const chips = inp.parentElement.querySelectorAll('.tag');
+          if (chips.length) chips[chips.length - 1].remove();
+        }
+      });
+    });
+
+    // ============== 清空按钮 ==============
+    $$('button[data-clear]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const sel = `input[name="${btn.dataset.clear}"]`;
+        const inp = $(sel);
+        if (inp) {
+          inp.value = '';
+          inp.focus();
+        }
+      });
+    });
+
+    // ============== 重置默认值 ==============
+    $('#reset-default').addEventListener('click', async () => {
+      if (!confirm('确认要重置为默认值?当前所有修改会丢失。')) return;
+      try {
+        const r = await fetch('/settings/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            personal: { exam_year: 2026, name: 'steven', study_mode: '全日制', degree_type: '专硕',
+                        target_discipline_code: '095136',
+                        target_schools: ['云南农业大学','沈阳农业大学','华中师范大学'] },
+            scores: { politics: 65, english_2: 62, math: 29, specialty_1: null, specialty_2: null },
+            preferences: { avoid_math: true, avoid_985: true, want_211: null,
+                           specialty_keywords: ['计算机','信息','农业信息技术'] },
+            regions: { preferred: ['B区','云南','辽宁'], acceptable: ['A区','湖北'] },
+            timeline: { registration: '2025-10', online_confirm: '2025-11',
+                        preliminary: '2025-12-20', retest: '2026-03' }
+          })
+        });
+        if (r.ok) { toast('已重置为默认值'); setTimeout(() => location.href = '/', 600); }
+        else toast('重置失败: ' + r.status, true);
+      } catch (e) { toast('重置失败: ' + e.message, true); }
+    });
+
+    // ============== 提交 ==============
+    function readForm() {
+      const payload = { personal: {}, scores: {}, preferences: {}, regions: {}, timeline: {} };
+      const buckets = payload;
+
+      $$('input[name]:not([type=radio]):not([type=checkbox])').forEach((el) => {
+        const path = el.name.split('.');
+        let v = el.value.trim();
+        // 数字字段:空 → null,有值 → Number(若是 month/date 原样保留)
+        if (el.type === 'number') {
+          v = v === '' ? null : Number(v);
+        } else if (el.type === 'month' || el.type === 'date') {
+          v = v === '' ? null : v;
+        }
+        if (path.length === 2) {
+          buckets[path[0]][path[1]] = v === '' ? null : v;
+        }
+      });
+
+      $$('input[type=checkbox][name]').forEach((el) => {
+        const path = el.name.split('.');
+        if (path.length === 2) buckets[path[0]][path[1]] = el.checked;
+      });
+
+      $$('input[type=radio][name]:checked').forEach((el) => {
+        const path = el.name.split('.');
+        let v = el.value;
+        if (el.name === 'preferences.want_211') {
+          v = v === 'null' ? null : (v === 'true');
+        }
+        if (path.length === 2) buckets[path[0]][path[1]] = v;
+      });
+
+      // tag lists
+      $$('[data-field][data-list="true"]').forEach((wrap) => {
+        const path = wrap.dataset.field.split('.');
+        const items = Array.from(wrap.querySelectorAll('.tag')).map((c) =>
+          c.firstChild.textContent.trim()
+        );
+        if (path.length === 2) buckets[path[0]][path[1]] = items;
+      });
+
+      // 清理空 bucket(用户没填的字段不发)
+      Object.keys(buckets).forEach((k) => {
+        if (Object.keys(buckets[k]).length === 0) delete buckets[k];
+      });
+      return buckets;
+    }
+
+    $('#profile-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#save-btn');
+      btn.disabled = true;
+      btn.textContent = '保存中...';
+      try {
+        const payload = readForm();
+        const r = await fetch('/settings/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (r.redirected || r.ok) {
+          toast('✅ 已保存,正在返回...');
+          setTimeout(() => location.href = '/', 400);
+        } else {
+          toast('保存失败: HTTP ' + r.status, true);
+          btn.disabled = false;
+          btn.textContent = '💾 保存';
+        }
+      } catch (err) {
+        toast('保存失败: ' + err.message, true);
+        btn.disabled = false;
+        btn.textContent = '💾 保存';
+      }
+    });
+
+    // ============== 启动 ==============
+    fillScalars(PROFILE);
+    fillListFields(PROFILE);
+  </script>
+</body>
+</html>

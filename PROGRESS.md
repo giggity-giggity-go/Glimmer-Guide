@@ -1,8 +1,8 @@
 # 研途萤火(yantu)项目进度
 
-> **截止日期**: 2026-06-15
+> **截止日期**: 2026-06-18
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
-> **状态**: ✅ v0.1.0 MVP 端到端跑通
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强(可折叠推理 + 设置页面)
 
 ---
 
@@ -14,17 +14,18 @@
 2. 实时抓取**研招网 5 个公开入口**做交叉验证
 3. 基于**自定义用户画像**做冲稳保推荐
 4. 提供 **Chainlit Web UI** 对话式访问
+5. **LangGraph Studio** 可视化 + step-by-step 调试(Phase 6 新增)
 
 ---
 
-## ✅ 已完成(6 阶段 + 修复)
+## ✅ 已完成(7 阶段 + 11 个修复)
 
 ### Phase 0: Bootstrap + GitHub
 - ✅ 私有 GitHub 仓库 `giggity-giggity-go/Glimmer-Guide` 创建
 - ✅ conda `Glimmer` (Python 3.11) 环境
 - ✅ pyproject.toml + 17 个核心依赖
 - ✅ 完整目录结构(7 个子包: data/ingest/scraper/mcp/graph/ui/utils)
-- ✅ .gitignore(Document/ / data/ / seed/ / models/ 都排除)
+- ✅ .gitignore(Document/ / data/ / seed/ / models/ / studio/__pycache__/ 都排除)
 
 ### Phase 0.5: 用户画像模块
 - ✅ Pydantic `UserProfile` 模型(5 大类:personal/scores/preferences/regions/timeline)
@@ -69,16 +70,78 @@
 - ✅ `on_message` 调 astream_events,tool 调用可视化(cl.Step)
 - ✅ `action_callback` "edit_profile" 修改用户画像
 - ✅ LLM 流式 token 累积
-- ✅ **HTTP 200 OK** 在 localhost:8000
+- ✅ **HTTP 200 OK** 在 localhost:8000(47ms,修好 Bug 10 后)
 
 ### Phase 5: 打磨 + 文档
 - ✅ README 完整(快速开始 + 结构 + E2E 测试命令)
 - ✅ 修 embedder FutureWarning
 - ✅ E2E 烟雾测试通过
 
+### Phase 6: LangGraph Studio 集成 + 可视化 🆕
+- ✅ `studio/` 目录创建(参考 LangChain 官方 studio 规范)
+- ✅ `studio/agent.py` 暴露 module-level `agent` 变量(LangGraph CLI 要求)
+- ✅ `studio/langgraph.json` 配置(指向 `agent.py:agent`)
+- ✅ `studio/visualize.py` 一键生成 4 种格式:
+  - `graph_visualization.mmd` (Mermaid 源,431 字符)
+  - `graph_visualization.json` (节点 + 边结构)
+  - `graph_visualization.png` (13KB,直接 `draw_mermaid_png()` 出图)
+  - `graph_ascii.txt` (ASCII art)
+- ✅ `studio/README.md` 完整使用文档(含启动 Studio / 渲染 PNG 3 种方法)
+- ✅ 装 `grandalf` 解决 ASCII 渲染依赖
+- ✅ 启动时自动设 `HF_HUB_OFFLINE=1`(避免 60s 网络卡死)
+
+### Phase 7: UI 增强(v0.1.1) 🆕
+
+#### 7.1 可折叠推理块(CollapsibleReasoning)
+- ✅ `src/yantu/ui/reasoning.py` — 跨厂商 reasoning 提取,统一 3 种范式:
+  - **范式 A**(智谱 GLM / OpenAI o-series):content 干净,只取 token 数
+  - **范式 B**(MiniMax-M3 `reasoning_split` / DeepSeek / Qwen):从 `additional_kwargs` 取
+  - **范式 C**(M2.7 / 原始 M3):从 content 抠 `<think>...</think>` 块
+- ✅ `public/elements/CollapsibleReasoning.jsx` — react-runner 渲染,默认折叠,显示 "🧠 推理过程 · 消耗 N tokens"
+- ✅ `src/yantu/ui/app.py` 在答案 message 上挂 `cl.CustomElement(name="CollapsibleReasoning", display="inline")`
+- ✅ `app.py` 同步加 `_strip_think()` 兜底过滤(避免 `<think>` 块在 content 里直接泄露)
+- ✅ 修复:不再用 `on_chat_model_stream` 累积 token,改为从最终 state 读 `response` + `reasoning` 字段(避免 router 和 synthesizer 两个 LLM 的 token 拼接)
+
+#### 7.2 设置按钮 + 独立 `/settings` 路由
+- ✅ **Header 入口**:`.chainlit/config.toml` 加 `[[UI.header_links]]`(`display_name="⚙️ 设置"`, `target="_self"`)
+- ✅ **位置修复**:`public/custom-header.js` 用 CSS `order: -1` 把 Settings 挪到"说明"按钮左边(React 重渲染不会覆盖;DOM `insertBefore` 会被覆盖)
+- ✅ **FastAPI 路由**:`src/yantu/ui/app.py` 挂 `@chainlit_app.get("/settings")` + `@chainlit_app.post("/settings/save")`(`chainlit.server.app`,因为 Chainlit 2.11.1 没有 `cl.app`)
+- ✅ **路由优先级修复**:`_reorder_routes()` 把 settings 路由挪到 Chainlit catch-all `/{full_path:path}` 前面,否则会被抢
+- ✅ **表单模板**:`src/yantu/ui/templates/settings.html` — 独立 HTML,无 React 依赖,23 个字段 / 5 section / tag input / 三态 radio / 清空按钮 / 重置默认值
+- ✅ **保存流程**:POST `/settings/save` → 303 redirect 回 `/`,前端下次 `export_markdown()` 自然读到新值
+- ✅ **Fallback**:`src/yantu/ui/chainlit.md` 加 `[[buttons]]` 段 + `app.py` 加 `@cl.action_callback("settings")` 在 chat 内点击也能开
+- ✅ **文案**:`start()` 文案从 "点左下角 Settings" → "点右上角 ⚙️ 设置"
+
+**设置页面字段**(5 section / 23 控件):
+| Section | 字段 |
+|---|---|
+| 个人信息 | 考研年份 / 昵称 / 学习方式 / 学位类型 / 目标学科代码 / 目标院校(列表) |
+| 已知分数 | 政治 / 英语二 / 数学 / 业务课一 / 业务课二 |
+| 偏好 | 避开数学 / 排除 985 / 是否要 211(三态) / 业务课关键词(列表) |
+| 地区 | 偏好地区(列表) / 可接受地区(列表) |
+| 时间轴 | 预报名 / 网上确认 / 初试 / 复试 |
+
+**`update_profile()` 复用**:`/settings/save` 直接调 `update_profile(payload)`(deep_merge + version+1),不需要新写后端逻辑。
+
+**LangGraph 形状**:
+```
+START → router ──(tool_calls)─→ tools ──┐
+              │                          │
+              └─(无 tool_calls)─→ synthesizer → END
+              ↑                           
+              └──── tools 跑完循环回 router
+```
+
+**要启用完整 Studio UI**(可选,需要装):
+```bash
+pip install -U "langgraph-cli[inmem]"
+langgraph dev --config studio/langgraph.json
+# 浏览器打开 https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+```
+
 ---
 
-## 🔧 修复历史(开发中发现)
+## 🔧 修复历史(11 个 bug)
 
 ### Bug 1: Scrapling 0.4.9 强依赖 playwright
 - **症状**: 导入 `scrapling` 时 `ModuleNotFoundError: No module named 'playwright'`
@@ -126,17 +189,39 @@
 - **症状**: 降级到 0.6.3 后 KeyError: '_type'
 - **解决**: 重新升回 1.5.9,改用 in-memory 策略
 
+### 🆕 Bug 10: bge 模型加载会卡 60s+(HF_HUB_OFFLINE 必设)
+- **症状**: 启动 chainlit 时,`port 8000` 处于 Listen 状态但 curl 等 60s+ 不返回,进程 CPU=0
+- **原因**: `SentenceTransformer(bge-small-zh-v1.5)` 启动时发 HEAD 请求到 `https://huggingface.co/.../adapter_config.json` 验证 metadata;本机网络受限(`WinError 10060`)→ retry 5 次,每次 sleep 1-2s,总卡 60-90s,期间阻塞整个 chainlit server
+- **解决**: 设 3 个环境变量
+  ```bash
+  HF_HUB_OFFLINE=1
+  TRANSFORMERS_OFFLINE=1
+  SENTENCE_TRANSFORMERS_HOME=D:\WORKSTATION\Glimmer Guide\models
+  ```
+  → 跳过联网检查,直接用 92MB 本地缓存,启动时间从 60s+ 降到 <1s
+- **影响**: 启动脚本必须带这 3 个变量(已固化到 `studio/agent.py` 的 os.environ.setdefault)
+- **修复后 HTTP 响应**: 47ms(原来 60s+ 不返回)
+- **教训**: SentenceTransformer 启动开销最大坑是联网 metadata check,不是权重加载
+
+### 🆕 Bug 11: PROGRESS.md 性能指标不准确(我之前把 HTTP 头当 LLM 耗时)
+- **症状**: 之前写"响应时间 ~10s/轮",实测端到端 LLM 完成 30-120s
+- **原因**: 混淆了"HTTP 首屏响应"(2.8s)和"LLM 端到端总耗时"
+- **解决**: 实测 chrome-devtools 两条 query,记录真实时间(见下面"性能指标 v2")
+- **教训**: AI 自报数字前必须实测,别凭印象
+
 ---
 
-## 🎯 v0.1.0 MVP 验收(用户实操)
+## 🎯 v0.1.0 MVP 验收(用户实操 2026-06-16 实测)
 
 | 测试 | 结果 |
 |---|---|
-| Chainlit 启动 | ✅ HTTP 200, 2.8s 响应 |
+| Chainlit 启动 | ✅ HTTP 200, 47ms 响应(修好 Bug 10 后) |
 | 页面渲染 | ✅ 标题 "研途萤火",完整用户画像显示,4 个示例 query |
-| Query "CCNU 复试分数线多少?" | ✅ M3 调 search_local + 实时抓 yz.chsi.com.cn,1715 字符综合回答,带 2 个信源 |
-| Tool 调用可视化 | ✅ LangGraph 工具节点正确执行 |
+| Query "CCNU 复试分数线多少?"(冷启动) | ✅ M3 调 get_school_info + search_local,852 字符综合回答,**端到端 ~120s** |
+| Query "云南农大 095136 招生人数"(热) | ✅ M3 调 search_local × 2,1535 字符综合回答,**端到端 ~32s** |
+| Tool 调用可视化 | ✅ LangGraph 工具节点正确执行(cl.Step) |
 | 流式输出 | ✅ 累积到 final answer |
+| LangGraph 可视化 | ✅ 4 种格式(Mermaid/JSON/ASCII/PNG)生成成功 |
 
 ---
 
@@ -153,13 +238,37 @@
 
 ---
 
-## 📊 性能指标
+## 📊 性能指标 v2(2026-06-16 实测,chrome-devtools)
 
-- **数据规模**: 10 个 seed 文件 → 204 个 Chroma chunks
-- **检索质量**: top-1 距离 0.27 命中核心信息(CCNU 257)
-- **响应时间**: M3 + tool 调用 ~10s/轮(2 轮 tool + 1 轮综合)
-- **Embedding**: bge-small-zh-v1.5 (512 维, ~260MB 一次性下载)
-- **存储**: SQLite 1 文件 + Chroma 1 文件 (~2.5MB),全在 `./data/`
+### HTTP 端点
+| 指标 | 修 Bug 10 前 | 修 Bug 10 后 |
+|---|---|---|
+| `GET /` 响应时间 | 60s+ 不返回 | **47ms** |
+| 进程 CPU | 0(卡死) | 正常 |
+
+### LLM 端到端(用户可见耗时)
+| Query | 工具 | 端到端 | Synthesizer 输出 |
+|---|---|---|---|
+| "CCNU 复试分数线多少?"(冷启动) | get_school_info + search_local | **~120s** | 852 字符 |
+| "云南农大 095136 招生人数"(热) | search_local × 2 | **~32s** | 1535 字符 |
+
+### LLM 循环分解
+| 阶段 | Query 1(冷) | Query 2(热) |
+|---|---|---|
+| 用户点 send → 首次 LLM | ~59s(冷启动) | <1s |
+| router LLM + tool + 2nd LLM | 16s | 13s |
+| Router 完 → Synthesizer 启动空档 | **37s** ⚠️ | 3s |
+| Synthesizer LLM | 8s | 16s |
+
+**数据规模**:
+- 10 个 seed 文件 → 204 个 Chroma chunks
+- 检索质量:top-1 距离 0.27 命中核心信息(CCNU 257)
+- Embedding:bge-small-zh-v1.5 (512 维, ~92MB 一次性下载)
+- 存储:SQLite 1 文件 + Chroma 1 文件 (~2.5MB),全在 `./data/`
+
+**⚠️ 性能瓶颈**:
+- Synthesizer 启动空档在 Query 1 高达 37s,原因待查(M3 model 临时慢响应 / LangGraph state 序列化慢)
+- 冷启动首次 query 比热 query 慢 ~3-4x(LangGraph 编译 + bge 模型 warmup)
 
 ---
 
@@ -172,6 +281,7 @@ D:\WORKSTATION\Glimmer Guide\
 ├── LICENSE (MIT)
 ├── pyproject.toml
 ├── environment.yml
+├── .env                        ← 含 LLM_API_KEY
 ├── .env.example
 ├── .gitignore
 ├── .chainlit/
@@ -180,12 +290,21 @@ D:\WORKSTATION\Glimmer Guide\
 ├── data/                       ← [不入库] 运行时数据
 │   ├── yanzhao.db              ← SQLite
 │   └── chroma/                 ← Chroma 持久化
-├── models/                     ← [不入库] bge 模型缓存
+├── models/                     ← [不入库] bge 模型缓存(92MB)
 ├── seed/                       ← [不入库] 种子资料
 │   ├── user_profile.default.json
 │   ├── 沈阳农业大学/
 │   ├── 华中师范大学/
 │   └── CCNU_调研/
+├── studio/                     ← 🆕 LangGraph Studio 集成
+│   ├── agent.py                ← Studio 入口
+│   ├── langgraph.json          ← LangGraph CLI 配置
+│   ├── visualize.py            ← 一键生成 Mermaid/JSON/ASCII/PNG
+│   ├── graph_visualization.mmd
+│   ├── graph_visualization.json
+│   ├── graph_visualization.png ← ✨ 直接看图
+│   ├── graph_ascii.txt
+│   └── README.md
 ├── scripts/
 │   ├── bootstrap.sh
 │   └── ingest_seed.py
@@ -226,14 +345,18 @@ D:\WORKSTATION\Glimmer Guide\
 ## ⚠️ 已知限制 & 后续 TODO
 
 ### 已知限制
-1. **ChromDB 写入**: vector_repo 当前是只读 in-memory 模式,新增 chunks 需要重启 Chainlit
-2. **LangGraph 持久化**: 用 MemorySaver,重启 Chainlit 丢会话
-3. **API key**: 用户的 key 已在对话历史中泄露过,**应作废旧 key 并生成新 key**
-4. **5 个 web tool**: 覆盖 5 个研招网入口,其他功能(调剂、录取)按设计明确不爬
+1. **HF_HUB_OFFLINE 必设**:启动 chainlit / studio 都必须设 3 个环境变量,否则 bge 加载卡 60s+(见 Bug 10)
+2. **ChromDB 写入**: vector_repo 当前是只读 in-memory 模式,新增 chunks 需要重启 Chainlit
+3. **LangGraph 持久化**: 用 MemorySaver,重启 Chainlit 丢会话
+4. **API key**: 用户的 key 已在对话历史中泄露过,**应作废旧 key 并生成新 key**
+5. **5 个 web tool**: 覆盖 5 个研招网入口,其他功能(调剂、录取)按设计明确不爬
+6. **Synthesizer 启动空档**: Query 1 测出 37s 空档,原因待查(可能 M3 model 慢响应)
 
 ### v0.2.0 候选功能
+- [ ] **固化 HF_HUB_OFFLINE 到启动脚本**(`scripts/run_chainlit.sh` / `.bat`)
 - [ ] 异步 SqliteSaver lifespan(保留会话历史)
 - [ ] Chroma in-memory 写回磁盘(atexit 钩子)
+- [ ] 调查 Synthesizer 37s 空档根因
 - [ ] Chainlit 设置面板的用户画像 JSON 编辑 UI
 - [ ] 流式响应可视化(分块输出)
 - [ ] LangSmith tracing 集成
@@ -244,12 +367,29 @@ D:\WORKSTATION\Glimmer Guide\
 - [ ] 历年分数线趋势(本地数据 + Chroma)
 - [ ] 个人进度跟踪(背书进度、模拟考)
 - [ ] 时间轴面板(报名/网上确认/初试/复试 倒计时)
+- [ ] 向量库元数据过滤(按 school/year 精确筛)
+
+### v0.1.1 验收清单(本次新增)
+- [x] 修复 Bug 10(HF_HUB_OFFLINE)
+- [x] 修复 Bug 11(性能指标文档)
+- [x] 新增 Phase 6(Studio + 可视化)
+- [x] 实测端到端响应时间基线
+- [x] **新增 Phase 7.1(CollapsibleReasoning 可折叠推理块)**
+- [x] **新增 Phase 7.2(header 设置按钮 + 独立 /settings 路由 + 23 字段表单)**
 
 ---
 
 ## 📜 启动方式
 
+### Chainlit(主 UI)
+
 ```bash
+# ⚠️ 必须设 3 个环境变量,否则卡 60s
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export SENTENCE_TRANSFORMERS_HOME="D:\WORKSTATION\Glimmer Guide\models"
+export HF_HOME="D:\ProgramData\Anaconda_envs\envs\Glimmer\Lib\site-packages"  # 可选
+
 conda activate Glimmer
 cd "D:\WORKSTATION\Glimmer Guide"
 # 一次性摄入(已有数据可跳过)
@@ -259,21 +399,39 @@ chainlit run src/yantu/ui/app.py
 # 浏览器 http://127.0.0.1:8000
 ```
 
+### PyCharm 跑 app.py
+
+Run → Edit Configurations → 选 Chainlit 配置 → Environment variables → 加上面 3 个变量。
+
+### Studio 可视化(本次新增)
+
+```bash
+# 快速生成图(无需 Studio server)
+HF_HUB_OFFLINE=1 python studio/visualize.py
+
+# 完整 Studio 调试(可选)
+pip install -U "langgraph-cli[inmem]"
+langgraph dev --config studio/langgraph.json
+# 浏览器打开 https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+```
+
+### 一键可视化
+
+```bash
+HF_HUB_OFFLINE=1 SENTENCE_TRANSFORMERS_HOME="$(pwd)/models" \
+    "D:\ProgramData\Anaconda_envs\envs\Glimmer\python.exe" studio/visualize.py
+# → 4 个文件:mermaid/json/ascii/png
+```
+
 ---
 
-## 📌 Git 状态(预期)
+## 📌 Git 状态
 
 ```
-9 个 commit on main:
-efcbe20 feat: initial project scaffold for yantu (研途萤火)
-4e19ac8 feat(phase-0.5): user profile module
-f182a0d feat(phase-1): local data ingestion
-558a16b feat(phase-2): yanzhao-mcp with 5 anonymous tools
-2b46546 feat(phase-3): LangGraph agent
-a68150b feat(phase-4): Chainlit Web UI
-28172ce feat(phase-5): polish + docs
-1836fae fix: Chroma 1.5.x + .env MiniMax-M3
-<pending>  docs: PROGRESS.md + v0.1.0-mvp tag
+当前 HEAD: 71f02ee (v0.1.0-mvp tag 后)
+即将提交:
+  <new> feat(ui): collapsible reasoning block + header settings button (v0.1.1)
+即将打 tag: v0.1.1
 ```
 
 ---
