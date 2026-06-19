@@ -20,7 +20,12 @@ class VendorConfig:
     base_url: str
     api_key_env: str
     model: str                          # resolve 后的模型(可能是 vendor default, 也可能是 LLM_MODEL)
-    extra_model_kwargs: dict = field(default_factory=dict)
+    # v0.2.2: 字段从 extra_model_kwargs 改名为 extra_body — LangChain ChatOpenAI
+    # 对 vendor-specific 私有参数(reasoning_split 等)必须走 extra_body= 才能
+    # 绕过 OpenAI SDK 的签名校验。model_kwargs 会被合并到顶层 payload,SDK
+    # 见到非标准参数直接 TypeError。详见 LangChain docs ChatOpenAI "model_kwargs
+    # vs extra_body" 段。
+    extra_body: dict = field(default_factory=dict)
 
 
 # Layer 1: 厂商列表 — 加新厂商就加一行(model 字段是该 vendor 的默认模型,会被 LLM_MODEL override)
@@ -45,13 +50,15 @@ VENDORS: dict[str, VendorConfig] = {
     ),
 }
 
-# Layer 3: 模型行为 — 按 model 名查 kwargs(加新模型就加一行)
+# Layer 3: 模型行为 — 按 model 名查 extra_body(加新模型就加一行)
+# v0.2.2: 字段从 model_kwargs 改名 extra_body — vendor-specific 私有参数必须
+# 走 extra_body 才能绕过 OpenAI SDK 签名校验(model_kwargs 会被 SDK 拒)。
 MODEL_BEHAVIORS: dict[str, dict] = {
-    "MiniMax-M3":     {"model_kwargs": {"reasoning_split": True}},  # 范式 B:中文 CoT
-    "MiniMax-M2.7":   {"model_kwargs": {}},                         # 范式 C:英文 <think>
-    "glm-5.1":        {"model_kwargs": {}},                         # 范式 A:隐藏
-    "o3-mini":        {"model_kwargs": {}},                         # 范式 A
-    # 以后加:"Qwen3-235B-A22B-Thinking-2507": {"model_kwargs": {"enable_thinking": True}},
+    "MiniMax-M3":     {"extra_body": {"reasoning_split": True}},   # 范式 B:中文 CoT
+    "MiniMax-M2.7":   {"extra_body": {}},                          # 范式 C:英文 <think>
+    "glm-5.1":        {"extra_body": {}},                          # 范式 A:隐藏
+    "o3-mini":        {"extra_body": {}},                          # 范式 A
+    # 以后加:"Qwen3-235B-A22B-Thinking-2507": {"extra_body": {"enable_thinking": True}},
 }
 
 DEFAULT_VENDOR = "zhipu"
@@ -81,8 +88,8 @@ def resolve_vendor() -> VendorConfig:
         or v.model
     )
 
-    # Layer 3: 查 model 行为(按 model 名查 kwargs)
-    behavior = MODEL_BEHAVIORS.get(model, {"model_kwargs": {}})
+    # Layer 3: 查 model 行为(按 model 名查 extra_body)
+    behavior = MODEL_BEHAVIORS.get(model, {"extra_body": {}})
 
     # Override(逃生口)
     base_url = os.getenv("LLM_BASE_URL_OVERRIDE") or v.base_url
@@ -95,11 +102,11 @@ def resolve_vendor() -> VendorConfig:
         )
         _logged = True
 
-    # 返回新的 VendorConfig,model 是 resolve 后的,kwargs 按 model 查
+    # 返回新的 VendorConfig,model 是 resolve 后的,extra_body 按 model 查
     return VendorConfig(
         name=v.name,
         base_url=base_url,
         api_key_env=v.api_key_env,
         model=model,
-        extra_model_kwargs=behavior.get("model_kwargs", {}),
+        extra_body=behavior.get("extra_body", {}),
     )

@@ -2,8 +2,8 @@
 
 > **截止日期**: 2026-06-19
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
-> **当前 vendor**: `minimax / MiniMax-M2.7-highspeed`(2026-06-19 切换,zhipu 1214 错误绕开)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试)
+> **当前 vendor**: `minimax / MiniMax-M3`(2026-06-19 切换,v0.2.2 extra_body 修复后 M3 可用)
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试) + ✅ v0.2.2 M3 extra_body 修复 (1 commit, 53/53 测试)
 
 ---
 
@@ -65,8 +65,9 @@
 
 ### 遗留 TODO(v0.2.1+)
 
+- 🔥 [ ] **M3 Intent classifier `function_calling` BadRequest 400** — v0.2.2 实测 M3 切到 `extra_body={"reasoning_split": True}` 后 HTTP 不再 TypeError,但 `llm.with_structured_output(Intent, method="function_calling").invoke(...)` 仍 100% 返回 BadRequestError 400(v0.2.2 后端日志可见)→ fallback 到 `target="both"` → 5 个工具全绑 → 单 query 拖 90s+(走 MAX_TOOL_ROUNDS=5 才进 synthesizer);可能修复:vendor MODEL_BEHAVIORS 给 M3 加 `{"function_calling": False}` 标记让 classifier 走 plain-text + 正则抽取,或直接给 M3 走 jieba/规则分类绕过 LLM
 - 🔥 [ ] **Tool 2 vendor 兼容** — M2.7 API BadRequestError 400,tool_call_id 格式不匹配;可能修复:vendor MODEL_BEHAVIORS 标记 strict=False / 减少 router 并行 tool / vendor config 加 tool_use_id_format
-- 🔥 [ ] **MiniMax-M3 `reasoning_split` 修复** — `model_kwargs={"reasoning_split": True}` 被 OpenAI SDK 拒绝(TypeError),需要改 `extra_body={"reasoning_split": True}`(LangChain 官方推荐 vendor-specific 参数走 extra_body)+ `vendors.py` 字段名 `model_kwargs` → `extra_body` + `llm.py` cache key 包含 extra_body(否则切 vendor cache 失效)
+- [x] ~~**MiniMax-M3 `reasoning_split` 修复** — `model_kwargs={"reasoning_split": True}` 被 OpenAI SDK 拒绝(TypeError),需要改 `extra_body={"reasoning_split": True}`(LangChain 官方推荐 vendor-specific 参数走 extra_body)+ `vendors.py` 字段名 `model_kwargs` → `extra_body` + `llm.py` cache key 包含 extra_body(否则切 vendor cache 失效)~~ → **v0.2.2 已修**,实测 M3 HTTP 不再 TypeError,UI 显示纯中文
 - [ ] zhipu Intent classifier 1214 错误绕过 — `function_calling` 在 glm-5.1 报 BadRequestError,zhipu 端需用其原生接口(非 OpenAI 兼容协议),降级 TODO;短期方案是接受 fallback 到 `target="both"`(Router LLM 自己判断 tool_calls,实测 4/4 走通)
 - [ ] Tool 5 (`search_local`) 单独 bench,涉及 bge 加载
 - [ ] scraper `search.do` ssdm 集成到 query_school_library 默认路径(目前需手动传 region 参数)
@@ -74,7 +75,7 @@
 - [x] LLM structured output 兼容性矩阵(部分模型不支持 `method="json_schema", strict=True`) → v0.2.1 已修,统一改 `method="function_calling"`(但 Intent classifier 在 zhipu 仍坏,见上)
 - [ ] LangSmith tracing 接入(便于调试 router/synthesizer 行为)
 - [ ] 异步 SqliteSaver 替代 MemorySaver(当前重启 Chainlit 丢会话历史)
-- [ ] minimax M2.7-highspeed v0.2.1 UI 实测(切回 minimax vendor 后 4 prompt 验证)
+- [x] ~~minimax M2.7-highspeed v0.2.1 UI 实测(切回 minimax vendor 后 4 prompt 验证)~~ → **v0.2.2 改为 M3 实测**,M2.7-highspeed 未跑
 
 ---
 
@@ -118,24 +119,109 @@ glm-5.1 fallback **永远**输出 fence JSON,但当 query 让 LLM 在 fence 前�
 
 **4/4 全部干净返回 markdown 渲染的中文回答**,无 JSON 文本。
 
-### Vendor 兼容性矩阵(v0.2.1 实测,2026-06-19)
+### Vendor 兼容性矩阵(v0.2.1 + v0.2.2 实测,2026-06-19)
 
 | Vendor | Model | Intent `function_calling` | Synthesizer `function_calling` | Router `bind_tools` | UI 实测 (4 prompt) |
 |---|---|---|---|---|---|
-| **minimax** | M2.7-highspeed | (待实测) | (待实测) | (待实测) | (待实测) |
+| **minimax** | M3(当前) | ⚠️ BadRequest 400 → fallback both | ✅ 200 OK | ✅ 200 OK | ✅ 2/4 实测无 JSON 泄漏("你好" + "北京大学");CCNU/云南农大因 Intent 反复 400 走 MAX_TOOL_ROUNDS 慢 |
+| minimax | M2.7-highspeed | (待实测) | (待实测) | (待实测) | (待实测) |
 | minimax | M2.7 | (历史 401) | (历史 401) | (历史 401) | n/a (key 失效) |
-| minimax | M3 | ❌ TypeError(reasoning_split) | ❌ TypeError | ❌ TypeError | n/a (需要 `extra_body` 修复) |
-| zhipu | glm-5.1 | ❌ BadRequestError 1214 | ✅ 200 OK | ✅ 200 OK | ✅ 4/4 干净(实测 309/444/374/361 字符) |
+| zhipu | glm-5.1 | ❌ BadRequestError 1214 → fallback both | ✅ 200 OK | ✅ 200 OK | ✅ 4/4 干净(实测 309/444/374/361 字符) |
 
-#### 已知问题
+#### v0.2.2 新增 M3 实测(2026-06-19,2/4 prompt)
 
-- **Intent classifier `function_calling` 在 zhipu glm-5.1 上 1214 错误**:仍然 fallback 到 `target="both"`(v0.2.0 hotfix 3ba29fd 生效)
-- **MiniMax-M3 `reasoning_split=True` 被 OpenAI SDK 拒绝**:需要把 `model_kwargs` 改 `extra_body`(v0.2.0 PROGRESS.md TODO 标的 P1 项,本 plan 不在范围内)
+**好消息**:
+- `extra_body={"reasoning_split": True}` 修复后,M3 HTTP 请求全部 200,**TypeError 不再发生**
+- 后端日志确认:`Creating ChatOpenAI: vendor=MiniMax, model=MiniMax-M3, ... extra_body={'reasoning_split': True}`
+- "你好" prompt 干净返回:"你好呀!我是研途萤火(yantu)..."(含用户画像渲染)
+- "北京大学 信息公开" 调 query_school_library + get_school_info,返回完整 markdown 渲染(北大 985 提醒 + 招生简章/调剂办法链接)
+
+**新发现(M3 vendor + function_calling 协议 BadRequest 400)**:
+- Intent classifier `llm.with_structured_output(Intent, method="function_calling").invoke(...)` 在 M3 上 100% 返回 `BadRequestError 400 - bad_request_err`
+- 每次 router 前都重试 1 次(2 次 HTTP 400 才进 fallback)
+- fallback 到 `target="both"` → 5 工具全绑 → LLM 反复调 query_school_library,走到 MAX_TOOL_ROUNDS=5 才进 synthesizer
+- 单 query 端到端 90-120s(Intent 2 次 + router 2 次 + 5 工具 + synthesizer 主路径失败 + fallback invoke)
+- Synthesizer 报 `'NoneType' object has no attribute 'answer'` — M3 返回的 FinalAnswer 结构异常,走 plain-text fallback
+
+**已知问题**
+
+- **Intent classifier `function_calling` 在 zhipu glm-5.1 / minimax M3 上 BadRequest**:zhipu 1214 + M3 400 → 都 fallback 到 `target="both"`(v0.2.0 hotfix 3ba29fd 生效)
+- **v0.2.2 新副作用**:Synthesizer `function_calling` 在 M3 上返回结构异常 → `'NoneType' object has no attribute 'answer'` → 走 fallback plain-text → 但 fallback 路径正常工作,_strip_fenced_json 兜底,UI 显示干净中文
 - **副作用**:greeting 类 chat intent 现在变成 "both"(5 个 tool 都给 LLM),但 LLM 自己决定不调 → 实际无 tool 调用 → 直接 synthesize → 干净回答
 - **zhipu 真要修 Intent 1214**:zhipu 端需要用其原生 `with_structured_output` 接口(非 OpenAI 兼容协议),降级为后续 TODO
+- **M3 真要修 Intent 400**:可能路径:vendor MODEL_BEHAVIORS 给 M3 加 `function_calling=false` 标记让 classifier 走 plain-text + 正则抽取,或给 M3 走规则分类(jieba 关键词匹配)绕过 LLM(见 v0.2.1+ TODO)
 
-#### minimax M2.7-highspeed 实测(2026-06-19,切换后待补)
-切换到 minimax vendor + M2.7-highspeed 后,需要重新跑 4-prompt UI 验证。当前 key 是 v0.2.0 期间用过的 `sk-cp-quf7...`,预期 `function_calling` 在 minimax 端可工作(实测 deep-research w9ycuvps4 阶段 `function_calling_works=true`)。**待补实测结果**。
+#### minimax M2.7-highspeed 实测(2026-06-19,未跑)
+v0.2.2 切到 M3 实测,M2.7-highspeed 没跑。预期 `function_calling` 在 minimax 端可工作(实测 deep-research w9ycuvps4 阶段 `function_calling_works=true`),但 M3 400 问题可能在 M2.7-highspeed 同样存在(同 vendor 同协议)。**待补实测结果**。
+
+---
+
+## ✅ v0.2.2 MiniMax-M3 extra_body 修复(2026-06-19,1 commit)
+
+### 问题
+用户切到 minimax / MiniMax-M3 后,所有 LLM 调用都报:
+```
+处理失败(TypeError): Completions.create() got an unexpected keyword argument 'reasoning_split'
+```
+Chainlit 完全无法对话,任何 prompt 都走兜底错误页。
+
+### 根因
+`vendors.py:50` 把 `reasoning_split=True` 放到 `MODEL_BEHAVIORS["MiniMax-M3"]["model_kwargs"]`,`llm.py` 通过 `ChatOpenAI(model_kwargs=v.extra_model_kwargs)` 传入。
+LangChain `ChatOpenAI.model_kwargs` 会被合并到 OpenAI SDK 的 `client.chat.completions.create(**model_kwargs)` 顶层签名参数。OpenAI SDK 在 `chat.completions.create` 见到 `reasoning_split`(MiniMax 私有非标准参数)→ TypeError,因为它不在 OpenAI 签名里。
+
+**LangChain 官方原话**(reference docs ChatOpenAI "`model_kwargs` vs `extra_body`" 段):
+> "Do not use `model_kwargs` for custom parameters that are not part of the standard OpenAI API, as this will cause errors when making API calls. Use `extra_body` instead."
+
+### 修复(2 个文件,1 个新 helper,53/53 测试通过)
+
+| # | 文件:行 | 改动 |
+|---|---|---|
+| 1 | `src/yantu/utils/vendors.py:23` | `VendorConfig.extra_model_kwargs: dict` → `extra_body: dict`(字段重命名) |
+| 2 | `src/yantu/utils/vendors.py:50` | `MODEL_BEHAVIORS["MiniMax-M3"]` 的 `model_kwargs` → `extra_body`(语法键名) |
+| 3 | `src/yantu/utils/vendors.py:85` | 默认值 `{"model_kwargs": {}}` → `{"extra_body": {}}` |
+| 4 | `src/yantu/utils/llm.py:33` | `_LLM_CACHE` key 从 3 元组 `(vendor, model, temp)` → 4 元组 `(vendor, model, temp, frozenset(extra_body.items()))`(cache key 加 extra_body,切 vendor/model 时不误用旧实例) |
+| 5 | `src/yantu/utils/llm.py:68` | `ChatOpenAI(model_kwargs=...)` → `ChatOpenAI(extra_body=...)`(透传 HTTP body 绕开 SDK 签名校验) |
+| 6 | `tests/utils/test_llm.py` | 2 个旧测试 `FakeVendor` dataclass 字段名更新 + 3 个新测试 `TestV022ExtraBody`(verify ChatOpenAI 收到 `extra_body` / 不收到 `model_kwargs` / extra_body 变化 invalidate cache) |
+
+### pytest
+```
+tests/utils/test_llm.py::TestHB13CacheKey        4/4 PASSED
+tests/utils/test_llm.py::TestV022ExtraBody       3/3 PASSED  ← 新增
+tests/utils/test_llm.py::TestHB14RedactKey       4/4 PASSED
+…
+================== 53 passed in 5.47s ==================
+```
+50 → 53 测试(+3 个 v0.2.2 专项测试)。
+
+### UI 实测(minimax M3,2026-06-19,2/4 prompt 干净)
+
+后端日志确认 `extra_body={'reasoning_split': True}` 正确传递,HTTP 不再 TypeError:
+```
+Creating ChatOpenAI: vendor=MiniMax, model=MiniMax-M3, base_url=https://api.minimaxi.com/v1,
+                     api_key=sk-c***Mr54, temperature=0.2, extra_body={'reasoning_split': True}
+HTTP Request: POST https://api.minimaxi.com/v1/chat/completions "HTTP/1.1 200 OK"
+```
+
+| Prompt | 工具 | JSON 泄漏 | 实测状态 |
+|---|---|---|---|
+| `你好` | 无 | ❌ 无 | ✅ "你好呀!我是研途萤火(yantu)..."(含用户画像) |
+| `北京大学 信息公开` | query_school_library + get_school_info | ❌ 无 | ✅ 完整 markdown 摘要(985 提醒 + 招生简章链接) |
+| `CCNU 复试分数线` | query_school_library → MAX_TOOL_ROUNDS=5 | (未完整返回) | ⚠️ Intent 反复 400 走兜底 |
+| `云南农大 招生人数` | (未测) | — | ⏸️ 同上 |
+
+### 新发现的 M3 vendor 兼容性 bug(v0.2.2+,后续 TODO)
+
+虽然 v0.2.2 解决了 `reasoning_split` TypeError,但实测暴露 2 个新问题:
+1. **Intent classifier `function_calling` 在 M3 上 BadRequest 400** — 100% 失败 → fallback to both → 5 工具全绑 → 拖慢端到端 90-120s
+2. **Synthesizer `function_calling` 在 M3 上 `'NoneType' object has no attribute 'answer'`** — M3 返回结构异常 → fallback plain-text → 但 `_strip_fenced_json` 兜底工作,UI 仍显示干净中文
+
+详见上面 "Vendor 兼容性矩阵" 段 "v0.2.2 新增 M3 实测" 段。
+
+### 总工作量
+- 代码:1 commit(2 文件改动 + 1 个新测试类)
+- pytest:53 passed(50 旧 + 3 新)
+- UI 实测:2/4 prompt 干净(其余因新发现 M3 Intent 400 拖慢,未跑完整 4 prompt)
+- **总计 ~30 min**(根因直接由错误信息给出,LangChain docs 确认 extra_body 方案)
 
 ---
 
