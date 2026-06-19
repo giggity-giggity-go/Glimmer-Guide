@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import String, Integer, Float, DateTime, Text, JSON
+from sqlalchemy import String, Integer, Float, DateTime, Text, JSON, Boolean, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -224,6 +224,91 @@ class UserProfileRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     profile_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ==================== v0.3.0 多会话 + 长短期记忆 ====================
+
+
+class Session(Base):
+    """会话元数据(侧边栏列表用)
+
+    thread_id 是 LangGraph Checkpointer 的会话隔离键,UI 层用人类可读的 title。
+    """
+
+    __tablename__ = "sessions"
+
+    thread_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(50), default="default", index=True)
+    title: Mapped[str] = mapped_column(String(100), default="新会话")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), index=True
+    )
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    compressed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    compression_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_sessions_user_updated", "user_id", "updated_at"),
+        Index("ix_sessions_user_pinned", "user_id", "is_pinned", "updated_at"),
+    )
+
+
+class MemoryFact(Base):
+    """长期记忆事实(LLM 抽取的结构化记忆)
+
+    fact_type 取值:
+    - user_attribute: 用户固有属性(数学不好 / 目标清华)
+    - preference: 偏好(避开 985 / 喜欢表格)
+    - conversation_outcome: 对话结论(决定考清华)
+    - open_question: 未解决问题(下次继续)
+    - person_mention: 提到的人/校/专业
+    - timeline_event: 时间事件(10 月报名)
+    """
+
+    __tablename__ = "memory_facts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(50), default="default", index=True)
+    fact_type: Mapped[str] = mapped_column(String(50), index=True)
+    fact_value: Mapped[dict] = mapped_column(JSON)
+    subject: Mapped[Optional[str]] = mapped_column(String(200), index=True, nullable=True)
+    keywords: Mapped[list] = mapped_column(JSON, default=list)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    source_thread: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_accessed_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now()
+    )
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    user_corrected_value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("ix_facts_user_subject", "user_id", "subject"),
+        Index("ix_facts_user_type", "user_id", "fact_type"),
+    )
+
+
+class UserSetting(Base):
+    """用户设置(单行 id=default,key-value 扩展)"""
+
+    __tablename__ = "user_settings"
+
+    id: Mapped[str] = mapped_column(String(20), primary_key=True, default="default")
+    context_window_tokens: Mapped[int] = mapped_column(Integer, default=30000)
+    context_keep_recent_messages: Mapped[int] = mapped_column(Integer, default=10)
+    memory_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    memory_injection_count: Mapped[int] = mapped_column(Integer, default=10)
+    memory_extract_every_n_turns: Mapped[int] = mapped_column(Integer, default=3)
+    sidebar_default_view: Mapped[str] = mapped_column(String(20), default="recent")
+    extra: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )

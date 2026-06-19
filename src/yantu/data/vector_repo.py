@@ -140,5 +140,22 @@ def count(collection_name: str = "recruit_2026") -> int:
     return _get_collection(client, collection_name).count()
 
 
+# ==================== v0.3.0 长期记忆 collection ====================
+
+# v0.3.0: 长期记忆向量 collection(与 recruit_2026 共享 singleton client,职责分离)
+# recruit_2026 = 用户本地 PDF/MD 资料库(本地 RAG)
+# long_term_memory = 跨会话长期记忆 facts(extractor 异步抽取)
+LONG_TERM_MEMORY_COLLECTION = "long_term_memory"
+
+
+def get_long_term_memory_collection():
+    """长期记忆向量 collection — 复用 singleton client(不开第二个 client)
+
+    add_documents / search / count 公开 API 已支持 collection_name 参数,
+    调用方直接传 vector_repo.LONG_TERM_MEMORY_COLLECTION 即可。
+    """
+    return _get_collection(_get_singleton_client(), LONG_TERM_MEMORY_COLLECTION)
+
+
 # SAFETY (CB-02): reset() and delete_collection() are intentionally NOT exposed.
 # To wipe data, manually delete the chroma_dir directory on disk.

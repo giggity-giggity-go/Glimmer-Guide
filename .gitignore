@@ -53,6 +53,11 @@ models/                  # HuggingFace 模型缓存
 Thumbs.db
 nul
 
+# ===== Chainlit 运行时产物 =====
+.chainlit/             # Chainlit 启动生成的 config + translations
+src/yantu/ui/.chainlit/  # 子目录实例
+src/yantu/ui/.files/   # Chainlit 上传文件缓存
+
 # ===== 日志 =====
 *.log
 logs/

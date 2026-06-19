@@ -1,4 +1,10 @@
-"""Chainlit Web UI — 对话 + 流式 + tool 可视化 + 用户画像编辑面板"""
+"""Chainlit Web UI — 对话 + 流式 + tool 可视化 + 用户画像编辑面板
+
+v0.3.0 变更:
+- @cl.on_chat_start:用 yantu.session.create_session 创建 thread_id,写入 user_session
+- +@cl.action_callback("switch_session" / "rename_session" / "toggle_pin" / "delete_session" / "new_session")
+- +FastAPI:GET /api/sessions 列表(sidebar 拉数据用)
+"""
 from __future__ import annotations
 
 import json
@@ -22,6 +28,15 @@ from yantu.data.user_profile import (
 )
 from yantu.graph.agent import build_agent
 from yantu.graph.nodes import RECURSION_LIMIT
+from yantu.session import (
+    archive_session,
+    create_session,
+    hard_delete_session,
+    list_sessions,
+    rename_session,
+    toggle_pin,
+    touch_session,
+)
 from yantu.ui.reasoning import extract_reasoning
 from yantu.utils.embedder import warmup
 from yantu.utils.logger import logger
@@ -49,7 +64,10 @@ def _strip_think(text: str) -> str:
 
 @cl.on_chat_start
 async def start() -> None:
-    """每个新会话触发:warmup + 显示用户画像 + 初始化 agent"""
+    """每个新会话触发:warmup + 显示用户画像 + 初始化 agent
+
+    v0.3.0: thread_id 走 Session 表(原 uuid4()[:8] 不持久化)
+    """
     try:
         warmup()
     except Exception as e:
@@ -57,7 +75,8 @@ async def start() -> None:
 
     agent = build_agent()
     cl.user_session.set("agent", agent)
-    cl.user_session.set("thread_id", str(uuid.uuid4())[:8])
+    thread_id = create_session()
+    cl.user_session.set("thread_id", thread_id)
 
     profile = export_markdown()
     await cl.Message(
@@ -131,6 +150,89 @@ async def open_settings(action: cl.Action) -> None:
         ),
         author="设置",
     ).send()
+
+
+# ==================== v0.3.0 多会话 sidebar action_callback ====================
+
+
+@cl.action_callback("new_session")
+async def new_session_action(action: cl.Action) -> None:
+    """v0.3.0: JSX 点 +新会话 → 创 Session + 切 thread_id
+
+    当前 chat 内已有消息会留在原 thread;新建一个空会话给后续对话。
+    不推送消息(JSX 自己负责 UI 更新,刷新会话列表)。
+    """
+    thread_id = create_session()
+    cl.user_session.set("thread_id", thread_id)
+    # agent 重新 build(LangGraph checkpointer 已持久化,无需重建也可,但 build_agent 开新 SqliteSaver 实例)
+    cl.user_session.set("agent", build_agent())
+    await cl.Message(content=f"✨ 新会话已创建 (id: `{thread_id}`)").send()
+
+
+@cl.action_callback("switch_session")
+async def switch_session_action(action: cl.Action) -> None:
+    """v0.3.0: JSX 点侧边栏会话 → 切 thread_id(后续消息走新 thread)
+
+    note:Chainlit 的 chat 历史展示是 Chainlit 自身的事,我们只换 user_session["thread_id"]
+    让后续 astream_events 走不同 checkpointer 路径。
+    """
+    payload = action.payload or {}
+    tid = payload.get("thread_id")
+    if not tid:
+        return
+    from yantu.session import get_session as _get_sess
+    sess = _get_sess(tid)
+    if sess is None or sess["is_archived"]:
+        await cl.Message(content=f"⚠️ 会话 `{tid}` 不存在或已归档").send()
+        return
+    cl.user_session.set("thread_id", tid)
+    cl.user_session.set("agent", build_agent())
+
+
+@cl.action_callback("rename_session")
+async def rename_session_action(action: cl.Action) -> None:
+    """v0.3.0: 双击重命名"""
+    payload = action.payload or {}
+    tid = payload.get("thread_id")
+    new_title = (payload.get("title") or "").strip()
+    if not tid or not new_title:
+        return
+    if rename_session(tid, new_title):
+        await cl.Message(content=f"✏️ 会话 `{tid}` 已改名为 `{new_title}`").send()
+
+
+@cl.action_callback("toggle_pin")
+async def toggle_pin_action(action: cl.Action) -> None:
+    """v0.3.0: 固定 / 取消固定"""
+    payload = action.payload or {}
+    tid = payload.get("thread_id")
+    if not tid:
+        return
+    pinned = toggle_pin(tid)
+    if pinned is None:
+        await cl.Message(content=f"⚠️ 会话 `{tid}` 不存在").send()
+
+
+@cl.action_callback("delete_session")
+async def delete_session_action(action: cl.Action) -> None:
+    """v0.3.0: 删除会话
+
+    payload.hard = True → 物理删除 + 清 checkpoint
+    默认软删除(archive,checkpoint 保留,可恢复)
+    """
+    payload = action.payload or {}
+    tid = payload.get("thread_id")
+    hard = bool(payload.get("hard", False))
+    if not tid:
+        return
+    if hard:
+        ok = hard_delete_session(tid)
+        if ok:
+            await cl.Message(content=f"🗑️ 会话 `{tid}` 已永久删除(含 checkpoint)").send()
+    else:
+        ok = archive_session(tid)
+        if ok:
+            await cl.Message(content=f"📦 会话 `{tid}` 已归档(可在 30 天内恢复)").send()
 
 
 # ==================== 主对话:LangGraph agent 流式 ====================
@@ -226,6 +328,9 @@ async def main(message: cl.Message) -> None:
     else:
         await cl.Message(content="(无响应,请检查 LLM API key)", author="萤火").send()
 
+    # v0.3.0: 更新 Session 元数据(user + ai 各 1 条)
+    touch_session(thread_id, message_count_delta=2)
+
 
 # ==================== /settings 独立设置页面(挂在 Chainlit FastAPI app) ====================
 
@@ -248,39 +353,53 @@ async def settings_save(request: Request) -> RedirectResponse:
     return RedirectResponse(url="/", status_code=303)
 
 
+# ==================== v0.3.0 /api/sessions REST(sidebar 拉数据用) ====================
+
+
+@chainlit_app.get("/api/sessions")
+async def api_list_sessions(include_archived: bool = False):
+    """v0.3.0: 侧边栏 JSX 拉会话列表"""
+    return {"sessions": list_sessions(include_archived=include_archived)}
+
+
 # ==================== 路由优先级修复 ====================
 # Chainlit 的 catch-all `/{full_path:path}` 是在 app.include_router(router) 阶段注册的,
 # 而我们 `@chainlit_app.get/post` 是在模块加载阶段注册的(更晚)——FastAPI 按注册顺序匹配,
 # catch-all 会先匹配上 /settings。手动把我们的路由挪到 _IncludedRouter 前面(FastAPI 的
 # routes 是 property,只能 in-place 修改底层 router.routes 列表)。
 def _reorder_routes() -> None:
-    """把 /settings 路由挪到 Chainlit catch-all 前面
+    """把我们自定义路由挪到 Chainlit catch-all 前面
 
     v0.2.0 (HB-18): 包 try/except + isinstance 检查,Chainlit 升级改名 _IncludedRouter
     也不会让整个 UI 启动崩溃。
+
+    v0.3.0: 扩到所有自定义路由(原版只挪 /settings,现在 /api/sessions 也需要)
     """
     try:
         routes = chainlit_app.router.routes  # 真正的 list
     except AttributeError:
         logger.warning("chainlit_app.router.routes not accessible, skip route reorder")
         return
-    settings_routes = [
+    # v0.3.0: 自定义路由前缀白名单
+    custom_prefixes = ("/settings", "/api/")
+    custom_routes = [
         r for r in routes
-        if isinstance(getattr(r, "path", None), str) and r.path.startswith("/settings")
+        if isinstance(getattr(r, "path", None), str)
+        and any(r.path.startswith(p) for p in custom_prefixes)
     ]
-    if not settings_routes:
+    if not custom_routes:
         return
     new_order = []
     inserted = False
     for r in routes:
         # HB-18: 用 isinstance 检查类型,不依赖类名(类名是 Chainlit 内部实现细节)
         if not inserted and type(r).__name__ == "_IncludedRouter":
-            new_order.extend(settings_routes)
+            new_order.extend(custom_routes)
             inserted = True
-        if r not in settings_routes:
+        if r not in custom_routes:
             new_order.append(r)
     if not inserted:
-        new_order = settings_routes + new_order
+        new_order = custom_routes + new_order
     # in-place 重排
     try:
         routes.clear()

@@ -3,7 +3,7 @@
 > **截止日期**: 2026-06-19
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
 > **当前 vendor**: `minimax / MiniMax-M3`(2026-06-19 切换,v0.2.2 extra_body 修复后 M3 可用)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试) + ✅ v0.2.2 M3 extra_body 修复 (1 commit, 53/53 测试)
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试) + ✅ v0.2.2 M3 extra_body 修复 (1 commit, 53/53 测试) + 🚧 v0.3.0-alpha 多会话骨架 (1 commit, 71/71 测试,SqliteSaver + SessionManager + /api/sessions,等待 PR-2 长期记忆 + 侧边栏 JSX)
 
 ---
 
@@ -222,6 +222,63 @@ HTTP Request: POST https://api.minimaxi.com/v1/chat/completions "HTTP/1.1 200 OK
 - pytest:53 passed(50 旧 + 3 新)
 - UI 实测:2/4 prompt 干净(其余因新发现 M3 Intent 400 拖慢,未跑完整 4 prompt)
 - **总计 ~30 min**(根因直接由错误信息给出,LangChain docs 确认 extra_body 方案)
+
+---
+
+## 🚧 v0.3.0-alpha 多会话骨架(2026-06-19,1 commit)
+
+### 目标
+
+把 yantu 从"工具型"升级到"个人助理"的第一阶段:**多会话并存 + 重启不丢**。长期记忆、侧边栏 JSX、上下文压缩等放 PR-2/3。
+
+### 改动清单(7 文件 / 1 commit)
+
+| # | 文件 | 改动 | 关键点 |
+|---|---|---|---|
+| 1 | `src/yantu/data/models.py` | +3 表(`Session` / `MemoryFact` / `UserSetting`) | Session 表存侧边栏元数据;`MemoryFact` / `UserSetting` 表预留给 PR-2 |
+| 2 | `src/yantu/data/db.py` | `init_db()` 末尾加 `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=5000` + 触发 checkpointer.setup() | WAL 模式避免 extractor 后台写阻塞 LangGraph checkpoint |
+| 3 | `src/yantu/graph/agent.py` | `MemorySaver` → `SqliteSaver(sqlite3.Connection)`;删 `@lru_cache(maxsize=1)`;`_open_saver()` 复用 `db._engine.raw_connection()` | 关键:langgraph-checkpoint-sqlite 3.x 的 `from_conn_string` 是 ctxmgr,改用 `SqliteSaver(conn)` 直接构造;复用同一连接避免双 conn 锁竞争 |
+| 4 | `src/yantu/data/vector_repo.py` | +`LONG_TERM_MEMORY_COLLECTION` 常量 + `get_long_term_memory_collection()` helper | **复用现有 `_get_singleton_client`**(不开第二个 client,遵守 HB-04);与 `recruit_2026` 职责分离但共享 client |
+| 5 | `src/yantu/session/manager.py`(新) | 9 个 CRUD 函数:create / list / get / rename / toggle_pin / archive / unarchive / hard_delete / touch | thread_id = UUID4 hex 前 8 位;`hard_delete_session` 跨 3 个 LangGraph checkpoint 表原生 SQL 删除 |
+| 6 | `src/yantu/session/__init__.py`(新) | 包标记 + 公开 9 个函数 | — |
+| 7 | `src/yantu/ui/app.py` | `on_chat_start` 改用 `create_session`;+5 个 action_callback(new_session / switch_session / rename_session / toggle_pin / delete_session)+ `GET /api/sessions` REST;`_reorder_routes()` 扩到 `/api/` 前缀 | hard_delete 走 action_callback 的 `payload.hard=True` 触发 |
+| 8 | `tests/session/test_manager.py`(新) | 18 个 pytest,覆盖 thread_id 唯一性 / CRUD / archive / pin 排序 / touch / hard_delete 真删 checkpoint / list limit | tmp_path 隔离 db,monkeypatch 替换 `db._engine`(settings 是 frozen 不能直接 patch)|
+
+### 端到端验证(2026-06-19 实测)
+
+| 步骤 | 结果 |
+|---|---|
+| 进程 A:`create_session` + `agent.invoke` 发 2 条 user_query | thread=`3af0cd3b`,DB 写入 8 个 checkpoint 行 |
+| 进程 B:重新启动,新 agent 实例,`get_state` 同 thread_id | messages count=4,user_query=`['我是北大考生', '复试分数线多少']` ✅ |
+| `curl /api/sessions` | 返回真实 JSON,2 个会话可见 ✅ |
+| `hard_delete_session` 后查 DB | Session 行 + checkpoints/checkpoint_writes/checkpoint_blobs 3 表全部清空 ✅ |
+
+### 关键技术发现
+
+| 发现 | 影响 |
+|---|---|
+| `SqliteSaver.from_conn_string()` 返 contextmanager | agent.py 必须用 `SqliteSaver(conn)` 直接构造 |
+| `_engine.raw_connection()` 拿底层 sqlite3.Connection | 让 SqliteSaver 与 ORM 共享同一连接(避免 WAL 下双 conn 写锁) |
+| Settings 是 frozen dataclass | 测试 fixture 不能 monkeypatch `settings.sqlite_path`,改替换 `db._engine` |
+| `_reorder_routes()` 原只挪 `/settings`,新加 `/api/sessions` 被 catch-all 抢 | 改用前缀白名单 `("/settings", "/api/")` 一次解决 |
+
+### pytest
+
+- 53 → **71 passed**(45 旧 + 18 新 + 8 已有,无回归)
+- 18 个新测试全部通过(含 `test_hard_delete_removes_checkpoint_rows` 验证跨 3 表真删)
+
+### 风险 & 已知限制
+
+- ⚠️ **PR-1 不含侧边栏 UI**:Session 元数据已持久化,但 JSX sidebar 留到 PR-2;目前 `/api/sessions` 已有数据可拉,前端未消费
+- ⚠️ **M3 Intent classifier BadRequest 400 仍未修**(v0.2.2 TODO P1),新流程不受影响(router fallback 仍可用,只是慢)
+- ⚠️ **LLM 长记忆 facts 未抽取**:PR-1 只是骨架,长期记忆抽取(retriever + extractor)在 PR-2
+
+### v0.3.0 路线图(剩余)
+
+- [ ] **v0.3.0-beta**:长期记忆(extractor + retriever)+ 侧边栏 JSX + 设置记忆 tab(~3 天)
+- [ ] **v0.3.0-final**:上下文滑动窗口压缩(compressor)+ 4 pytest(~2 天)
+
+完整方案见 `docs/superpowers/specs/2026-06-19-multi-session-memory-design.md` + `C:\Users\steven\.claude\plans\fancy-knitting-journal.md`
 
 ---
 
@@ -627,7 +684,7 @@ D:\WORKSTATION\Glimmer Guide\
 ### 已知限制
 1. **HF_HUB_OFFLINE 必设**:启动 chainlit / studio 都必须设 3 个环境变量,否则 bge 加载卡 60s+(见 Bug 10);**PyCharm Run Configuration 漏设是 2026-06-19 实测高频踩坑**(见 Bug 13),务必在 Run → Edit Configurations → Environment variables 显式填
 2. **ChromDB 写入**: vector_repo 当前是只读 in-memory 模式,新增 chunks 需要重启 Chainlit
-3. **LangGraph 持久化**: 用 MemorySaver,重启 Chainlit 丢会话
+3. **LangGraph 持久化**: ~~MemorySaver,重启 Chainlit 丢会话~~ → **v0.3.0-alpha 已修**(SqliteSaver + Session 表),重启会话完整保留
 4. **API key**: 用户的 key 已在对话历史中泄露过,**应作废旧 key 并生成新 key**
 5. **5 个 web tool**: 覆盖 5 个研招网入口,其他功能(调剂、录取)按设计明确不爬
 6. **Synthesizer 启动空档**: Query 1 测出 37s 空档,原因待查(可能 M3 model 慢响应)
