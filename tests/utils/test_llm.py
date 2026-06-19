@@ -1,6 +1,7 @@
 """LLM 单元测试 — HB-13 cache key + HB-14 api_key redact"""
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -33,37 +34,62 @@ class TestHB13CacheKey:
         b = get_llm(temperature=0.0)
         assert a is not b, "cache should differ by temperature"
 
-    @patch("yantu.utils.llm.settings")
-    def test_different_model_invalidates_cache(self, mock_settings):
-        """模拟切换 LLM_MODEL → 新实例"""
-        # 先建一个实例
+    @patch("yantu.utils.llm.resolve_vendor")
+    def test_different_model_invalidates_cache(self, mock_resolve):
+        """模拟切换 vendor model → 新实例(HB-13)"""
+        from dataclasses import dataclass
         from yantu.utils.llm import _LLM_CACHE, get_llm
-        mock_settings.llm_model = "model-A"
-        mock_settings.llm_base_url = "https://api.test"
-        mock_settings.llm_api_key = "sk-test1234567890abcdef"
-        mock_settings.llm_temperature = 0.7
-        a = get_llm()
-        assert len(_LLM_CACHE) == 1
 
-        # 切到 model-B → 应新建实例
-        mock_settings.llm_model = "model-B"
+        @dataclass
+        class FakeVendor:
+            name: str
+            model: str
+            base_url: str
+            api_key_env: str = "LLM_API_KEY"
+            extra_model_kwargs: dict = None
+
+        # vendor-A model-X
+        mock_resolve.return_value = FakeVendor(
+            name="vendor-a", model="model-X", base_url="https://api.test"
+        )
+        with patch.dict(os.environ, {"LLM_API_KEY": "sk-test1234567890abcdef"}):
+            a = get_llm()
+            assert len(_LLM_CACHE) == 1
+
+        # vendor-A model-Y(同一 vendor 不同 model → 新实例)
+        mock_resolve.return_value = FakeVendor(
+            name="vendor-a", model="model-Y", base_url="https://api.test"
+        )
         b = get_llm()
         assert a is not b, "model change should invalidate cache"
         assert len(_LLM_CACHE) == 2
 
-    @patch("yantu.utils.llm.settings")
-    def test_different_base_url_invalidates_cache(self, mock_settings):
+    @patch("yantu.utils.llm.resolve_vendor")
+    def test_different_vendor_invalidates_cache(self, mock_resolve):
+        """切换 vendor → 新实例(HB-13)"""
+        from dataclasses import dataclass
         from yantu.utils.llm import _LLM_CACHE, get_llm
-        mock_settings.llm_model = "model-X"
-        mock_settings.llm_base_url = "https://api-a.test"
-        mock_settings.llm_api_key = "sk-test1234567890abcdef"
-        mock_settings.llm_temperature = 0.7
-        a = get_llm()
-        assert len(_LLM_CACHE) == 1
 
-        mock_settings.llm_base_url = "https://api-b.test"
+        @dataclass
+        class FakeVendor:
+            name: str
+            model: str
+            base_url: str
+            api_key_env: str = "LLM_API_KEY"
+            extra_model_kwargs: dict = None
+
+        mock_resolve.return_value = FakeVendor(
+            name="vendor-a", model="model-X", base_url="https://api-a.test"
+        )
+        with patch.dict(os.environ, {"LLM_API_KEY": "sk-test1234567890abcdef"}):
+            a = get_llm()
+            assert len(_LLM_CACHE) == 1
+
+        mock_resolve.return_value = FakeVendor(
+            name="vendor-b", model="model-X", base_url="https://api-b.test"
+        )
         b = get_llm()
-        assert a is not b
+        assert a is not b, "vendor change should invalidate cache"
         assert len(_LLM_CACHE) == 2
 
 

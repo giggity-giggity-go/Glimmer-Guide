@@ -8,6 +8,8 @@ v0.2.0 变更 (HB-03 + HB-09 + MB-05):
   - 强制 max_tokens 1500 + answer max_length 1500
   - 强制 grounding 声明,防止 LLM 编造
 - MB-05: router temperature 降到 0.2
+- v0.2.0-alpha 同期: router + synthesizer 各调 extract_reasoning,把
+  reasoning/reasoning_tokens 写入 state(用户画像 UI 的 CollapsibleReasoning 折叠块需要)
 """
 from __future__ import annotations
 
@@ -20,7 +22,15 @@ from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
 
 from yantu.graph.state import AgentState
-from yantu.graph.tools import ALL_TOOLS, search_local, get_school_info, get_recruitment_notices, get_disciplines, query_school_library
+from yantu.graph.tools import (
+    ALL_TOOLS,
+    search_local,
+    get_school_info,
+    get_recruitment_notices,
+    get_disciplines,
+    query_school_library,
+)
+from yantu.ui.reasoning import extract_reasoning
 from yantu.utils.llm import get_llm, get_user_profile_prompt
 from yantu.utils.logger import logger
 
@@ -133,14 +143,19 @@ def make_router_node():
             msgs.extend(state["messages"])
         msgs.append(HumanMessage(content=query))
         ai = llm_with_tools.invoke(msgs)
+        # v0.2.0-alpha: 同时返回 reasoning 字段(供 CollapsibleReasoning UI)
+        _r = extract_reasoning(ai)
         logger.info(
             f"Router: target={intent.target}, "
             f"tool_calls={bool(ai.tool_calls)}, "
-            f"tools_available={[t.name for t in tools]}"
+            f"tools_available={[t.name for t in tools]}, "
+            f"reasoning_chars={len(_r.text)}"
         )
         return {
             "messages": [ai],
             "intent": intent.target,
+            "reasoning": _r.text + ("\n" if _r.text else ""),
+            "reasoning_tokens": _r.tokens,
         }
 
     return router
@@ -209,6 +224,7 @@ def make_synthesizer_node():
                 f"Synthesizer: answer_chars={len(response)}, "
                 f"citations={len(citations)}, grounded={grounded}"
             )
+            # v0.2.0-alpha: synthesizer 不再累积 reasoning(已在 router 中抓取)
             return {
                 "messages": [],
                 "response": response,
@@ -219,11 +235,14 @@ def make_synthesizer_node():
             logger.warning(f"Synthesizer structured output failed: {e}, fallback to plain text")
             ai = llm.invoke(msgs + [HumanMessage(content="请直接用 1-3 段话回答。")])
             response = ai.content if isinstance(ai.content, str) else str(ai.content)
+            _r = extract_reasoning(ai)
             return {
                 "messages": [ai],
                 "response": response,
                 "citations": [],
                 "grounded": False,  # 兜底路径无法保证 grounded
+                "reasoning": _r.text,
+                "reasoning_tokens": _r.tokens,
             }
 
     return synthesizer

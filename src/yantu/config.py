@@ -62,11 +62,14 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    # Legacy LLM defaults — see yantu/utils/vendors.py for the active source of truth.
+    # These fields remain for backward compatibility with 10+ consumers; vendor registry
+    # is resolved at first get_llm() call and takes precedence.
     return Settings(
-        llm_base_url=os.getenv("LLM_BASE_URL", "https://api.MiniMax.com/v1"),
+        llm_base_url=os.getenv("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/"),
         llm_api_key=os.getenv("LLM_API_KEY", ""),
-        llm_model=os.getenv("LLM_MODEL", "MiniMax-M3"),
-        llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+        llm_model=os.getenv("LLM_MODEL", "glm-5.1"),
+        llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
         data_dir=_path("DATA_DIR", "./data"),
         seed_dir=_path("SEED_DIR", "./seed"),
         chroma_dir=_path("CHROMA_DIR", "./data/chroma"),

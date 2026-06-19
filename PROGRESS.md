@@ -2,7 +2,7 @@
 
 > **截止日期**: 2026-06-18
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强(可折叠推理 + 设置页面)
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线
 
 ---
 
@@ -139,9 +139,54 @@ langgraph dev --config studio/langgraph.json
 # 浏览器打开 https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
 ```
 
+### Phase 8: 工具耗时基线测试(2026-06-18 实测) 🆕
+
+**目的**: 量化 5 个 yanzhao tool 的 wall-clock 时长,为后续性能优化提供基线。
+
+**测试脚本**: `D:\tmp\glimmer_perf\bench_tools.py`(直调 `endpoints.py` async 函数,绕过 LangChain `@tool` 装饰器)
+
+**测试范围**: Tool 1 / 2 / 4(Tool 3 硬编码无网络,Tool 5 走本地 Chroma 单独测)
+
+**实测结果**(2026-06-18,conda env `Glimmer`):
+
+| 工具 | 调用 | 返回条数 | 耗时(s) |
+|---|---|---|---|
+| `query_school_library(page=1)` | 1 次 | 20 schools | **3.93** |
+| `query_school_library(page=2)` | 1 次 | 20 schools | **2.33** |
+| `get_school_info(school_id=367878)` | 3 次 | 1 school | **1.77 / 2.95 / 2.27**(avg 2.33) |
+| `get_recruitment_notices(page=1)` | 3 次 | 80 notices | **2.00 / 2.32 / 2.11**(avg 2.14) |
+
+**耗时构成分析**:
+```
+总耗时 = polite_delay(1-3s 随机) + HTTP请求(50-300ms) + parsel解析(10-50ms)
+       └──────────── 50-90% ─────────────┘└── ~5-10% ──┘└─ <5% ─┘
+```
+
+**三个关键发现**:
+- **冷启动成本高**: Tool 1 page=1 (3.93s) 比 page=2 (2.33s) 慢 1.6s,主因 TCP/TLS/DNS 握手
+- **Tool 2 波动大**: 北大详情页 1.77-2.95s 差 1.2s,服务端渲染时长不稳定 → router 应给 8s deadline
+- **Tool 4 最稳定**: 三次 2.0-2.3s,简章页面 HTML 最小,可放心并发翻页
+
+**对端到端的影响**(估算):
+| 场景 | 工具耗时 | + LLM | 端到端 |
+|---|---|---|---|
+| 无工具 | 0s | 3-8s | 3-8s |
+| 单跳 | ~2.3s | 5-10s | 7-12s |
+| 双跳 | ~5.2s | 5-10s | 10-16s |
+| 三跳 | ~6.5s | 5-10s | 11-16s |
+
+**潜在优化点**(未实施):
+1. **polite_delay 降为 0**(.env 改 `scraper_min_delay=0`)→ 工具耗时立刻降到 ~300ms;⚠️ 仅自用,生产会触发限速
+2. **httpx.AsyncClient 全 async**:现在 `loop.run_in_executor` 把 async 桥成 sync,丢并发能力
+3. **预热 keep-alive**:服务启动时先发一次 ping 请求,首请求耗时减半
+
+**遗留**:
+- Tool 5 (`search_local`) 还没单独测,涉及 bge embedding 加载,值得下次跑
+- 没测并发场景(当前架构不支持,需要先改 client.py)
+
 ---
 
-## 🔧 修复历史(11 个 bug)
+## 🔧 修复历史(12 个 bug)
 
 ### Bug 1: Scrapling 0.4.9 强依赖 playwright
 - **症状**: 导入 `scrapling` 时 `ModuleNotFoundError: No module named 'playwright'`
@@ -208,6 +253,12 @@ langgraph dev --config studio/langgraph.json
 - **原因**: 混淆了"HTTP 首屏响应"(2.8s)和"LLM 端到端总耗时"
 - **解决**: 实测 chrome-devtools 两条 query,记录真实时间(见下面"性能指标 v2")
 - **教训**: AI 自报数字前必须实测,别凭印象
+
+### 🆕 Bug 12: loguru `logger` 没有 `setLevel()` 属性
+- **症状**: 测试脚本调 `logger.setLevel("WARNING")` 抛 `AttributeError`
+- **原因**: `yantu.utils.logger` 暴露的是 **loguru `Logger`**,不是 stdlib `logging.Logger`,没有 `setLevel`
+- **解决**: 用 loguru 风格 `logger.remove()` + `logger.add(..., level="WARNING")`
+- **教训**: 项目用 loguru 时,任何调试脚本关日志必须走 loguru API
 
 ---
 
@@ -377,6 +428,12 @@ D:\WORKSTATION\Glimmer Guide\
 - [x] **新增 Phase 7.1(CollapsibleReasoning 可折叠推理块)**
 - [x] **新增 Phase 7.2(header 设置按钮 + 独立 /settings 路由 + 23 字段表单)**
 
+### v0.1.1+ 测量基线(2026-06-18 补测,未发布)
+- [x] **新增 Phase 8(工具耗时基线测试)**:Tool 1/2/4 实测,平均 2.0-2.3s
+- [x] **新增 Bug 12**:loguru `setLevel` 误用 → 修正测试脚本
+- [ ] 待测 Tool 5(`search_local` 单独跑,涉及 bge 加载)
+- [ ] 待测并发场景(需先重写 client.py)
+
 ---
 
 ## 📜 启动方式
@@ -428,10 +485,11 @@ HF_HUB_OFFLINE=1 SENTENCE_TRANSFORMERS_HOME="$(pwd)/models" \
 ## 📌 Git 状态
 
 ```
-当前 HEAD: 71f02ee (v0.1.0-mvp tag 后)
-即将提交:
-  <new> feat(ui): collapsible reasoning block + header settings button (v0.1.1)
-即将打 tag: v0.1.1
+当前 HEAD: 0be98ea (v0.1.1 tag 已推)
+当前 tag: v0.1.1
+本次更新(未提交):
+  M PROGRESS.md  ← 新增 Phase 8 工具耗时基线 + Bug 12 + v0.1.1+ 验收
+下一步: 暂无 — 文档更新,暂不 commit/tag
 ```
 
 ---

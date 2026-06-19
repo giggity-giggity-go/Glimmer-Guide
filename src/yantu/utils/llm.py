@@ -1,18 +1,22 @@
-"""LLM 封装 — ChatOpenAI 兼容(指向 MiniMax-M3 或其他 OpenAI 兼容服务)
+"""LLM 封装 — 委托厂商注册表 + cache key 含 vendor(HB-13)+ api_key redact(HB-14)
 
-v0.2.0 变更 (HB-13 + HB-14):
-- cache key 从 float 改成 (model, base_url, api_key_prefix, temperature)
-  四元组 — vendor 切换或 api_key 换了立即生效,不再误用旧实例
+v0.2.0 (HB-13 + HB-14):
+- cache key 从 float 改成 (vendor_name, model, temperature) 三元组
+  vendor 切换或 model 切换立即生效,不再误用旧 vendor 实例
 - api_key 日志显式 redact,任何 debug 调用都不会泄明文
+
+vendor registry 是 llm 配置的唯一真相源;`yantu.config.settings` 的
+LLM_* 字段保留仅作向后兼容。
 """
 from __future__ import annotations
 
+import os
 from typing import Tuple
 
 from langchain_openai import ChatOpenAI
 
-from yantu.config import settings
 from yantu.utils.logger import logger
+from yantu.utils.vendors import resolve_vendor
 
 
 # HB-14: 永远不要 log 完整 api_key
@@ -25,37 +29,43 @@ def _redact_key(api_key: str) -> str:
     return f"{api_key[:4]}***{api_key[-4:]}"
 
 
-# HB-13: cache key 包含 vendor-identifying fields,热切换/换 key 立即生效
-_LLM_CACHE: dict[Tuple[str, str, str, float], ChatOpenAI] = {}
+# HB-13: cache key 包含 vendor + model,切换 vendor/model 立即失效
+_LLM_CACHE: dict[Tuple[str, str, float], ChatOpenAI] = {}
 
 
 def get_llm(temperature: float | None = None) -> ChatOpenAI:
-    """单例 LLM(按 (model, base_url, api_key_prefix, temperature) 缓存)
+    """单例 LLM(按 (vendor_name, model, temperature) 缓存)
 
-    切换 .env 中的 LLM_MODEL / LLM_BASE_URL / LLM_API_KEY / LLM_TEMPERATURE
-    后,下次调用会创建新实例,不再误用旧 vendor 的配置。
+    切换 LLM_VENDOR/LLM_MODEL_OVERRIDE 等环境变量后,下次调用会创建新实例,
+    不再误用旧 vendor 的配置。
     """
-    temp = temperature if temperature is not None else settings.llm_temperature
-    key = (
-        settings.llm_model,
-        settings.llm_base_url,
-        settings.llm_api_key[:8] if settings.llm_api_key else "",
-        temp,
+    v = resolve_vendor()
+    t = (
+        temperature
+        if temperature is not None
+        else float(os.getenv("LLM_TEMPERATURE", "0.7"))
     )
+    key = (v.name, v.model, t)
     if key not in _LLM_CACHE:
+        api_key = os.getenv("LLM_API_KEY_OVERRIDE") or os.getenv(v.api_key_env, "")
+        if not api_key:
+            raise ValueError(
+                f"API key missing for vendor {v.name!r}: "
+                f"set env var {v.api_key_env} (or LLM_API_KEY_OVERRIDE)"
+            )
         logger.info(
-            f"Creating ChatOpenAI: model={settings.llm_model}, "
-            f"base_url={settings.llm_base_url}, "
-            f"api_key={_redact_key(settings.llm_api_key)}, "
-            f"temperature={temp}"
+            f"Creating ChatOpenAI: vendor={v.name}, model={v.model}, "
+            f"base_url={v.base_url}, api_key={_redact_key(api_key)}, "
+            f"temperature={t}"
         )
         _LLM_CACHE[key] = ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-            temperature=temp,
+            model=v.model,
+            api_key=api_key,
+            base_url=v.base_url,
+            temperature=t,
             timeout=60.0,
             max_retries=2,
+            model_kwargs=v.extra_model_kwargs or {},
         )
     return _LLM_CACHE[key]
 

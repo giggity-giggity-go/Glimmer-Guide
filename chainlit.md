@@ -1,14 +1,22 @@
-# Welcome to Chainlit! 🚀🤖
+# 研途萤火 🦟
 
-Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
+为 2026 考研人设计的个人助理。
 
-## Useful Links 🔗
+## 快速开始
 
-- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
-- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
+试试这些问题(任选一个):
 
-We can't wait to see what you create with Chainlit! Happy coding! 💻😊
+- `CCNU 复试分数线多少?`
+- `云南农大 招生人数`
+- `哪些学校避数学?`
+- `北京大学 信息公开`
 
-## Welcome screen
+## 主要功能
 
-To modify the welcome screen, edit the `chainlit.md` file at the root of your project. If you do not want a welcome screen, just leave this file empty.
+- 🔍 **本地资料检索**:你已摄入的 PDF / 调研报告
+- 🌐 **研招网实时查询**:院校库、专业库、招生简章
+- 🎯 **择校建议**:基于你的画像(分数/偏好/地区)智能推荐
+
+## 个性化
+
+左下角 **Settings** 调整你的画像(分数、偏好、关键词),调整后所有对话立即生效。
