@@ -38,6 +38,10 @@ async def query_school_library(
     Args:
         page: 页码(从 1 开始)
         region: 省份过滤(可选,不在 URL 里用,留给前端筛选)
+
+    Returns:
+        列表,每项含 school_id/name/city/department/is_211/is_985/info_url。
+        失败/空页时返回 [{"error": "...", "tool": "query_school_library", "page": N}](HB-10 修复)
     """
     start = (page - 1) * 20
     url = f"{settings.yanzhao_base_url}/sch/"
@@ -45,7 +49,13 @@ async def query_school_library(
     resp = await client.get(url, params=params)
     if resp.status_code != 200:
         logger.error(f"query_school_library status={resp.status_code}")
-        return []
+        return [
+            {
+                "error": f"http_status_{resp.status_code}",
+                "tool": "query_school_library",
+                "page": page,
+            }
+        ]
 
     sel = Selector(text=resp.text)
     out: List[Dict[str, Any]] = []
@@ -101,6 +111,16 @@ async def query_school_library(
             }
         )
     logger.info(f"query_school_library page={page} → {len(out)} schools")
+    # HB-10: 空页/越界时显式 error 信号,而不是静默返 []
+    if not out:
+        return [
+            {
+                "error": "empty_result",
+                "tool": "query_school_library",
+                "page": page,
+                "hint": "页码超出范围(全国约 47 页)或研招网返回空响应",
+            }
+        ]
     return out
 
 
@@ -219,7 +239,13 @@ async def get_recruitment_notices(page: int = 1) -> List[Dict[str, Any]]:
     resp = await client.get(url, params=params)
     if resp.status_code != 200:
         logger.error(f"get_recruitment_notices status={resp.status_code}")
-        return []
+        return [
+            {
+                "error": f"http_status_{resp.status_code}",
+                "tool": "get_recruitment_notices",
+                "page": page,
+            }
+        ]
 
     sel = Selector(text=resp.text)
     out: List[Dict[str, Any]] = []
@@ -241,6 +267,16 @@ async def get_recruitment_notices(page: int = 1) -> List[Dict[str, Any]]:
             }
         )
     logger.info(f"get_recruitment_notices page={page} → {len(out)} notices")
+    # HB-10: 空页/越界时显式 error 信号,而不是静默返 []
+    if not out:
+        return [
+            {
+                "error": "empty_result",
+                "tool": "get_recruitment_notices",
+                "page": page,
+                "hint": "页码超出范围(全国约 25 页)或研招网返回空响应",
+            }
+        ]
     return out
 
 

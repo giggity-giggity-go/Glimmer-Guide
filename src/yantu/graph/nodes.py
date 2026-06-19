@@ -95,12 +95,33 @@ def make_tool_node():
 
 
 def should_continue(state: AgentState) -> Literal["tools", "synthesize"]:
-    """决定下一步:调工具还是综合输出"""
+    """决定下一步:调工具还是综合输出
+
+    v0.2.0 (HB-01): 加 ToolMessage 计数,避免 router→tools→router 死循环
+    触发 GraphRecursionError 500。超过 MAX_TOOL_ROUNDS 强制走 synthesizer。
+    """
     msgs = state.get("messages", [])
     if not msgs:
+        return "synthesize"
+    # HB-01: 历史 ToolMessage 数量超过 MAX_TOOL_ROUNDS → 强制 synthesize
+    tool_msg_count = sum(
+        1 for m in msgs if getattr(m, "type", "") == "tool"
+    )
+    if tool_msg_count >= MAX_TOOL_ROUNDS:
+        logger.info(
+            f"hit MAX_TOOL_ROUNDS={MAX_TOOL_ROUNDS} "
+            f"(tool_msg_count={tool_msg_count}), force synthesize"
+        )
         return "synthesize"
     last = msgs[-1]
     # AI 消息带 tool_calls → 执行
     if hasattr(last, "tool_calls") and last.tool_calls:
         return "tools"
     return "synthesize"
+
+
+# HB-01: 单次 query 最多调 5 个 tool(防止死循环 / LLM hallucination 重复调)
+MAX_TOOL_ROUNDS = 5
+
+# HB-01: astream_events 的 recursion_limit 上限(冗余保护,should_continue 已强制)
+RECURSION_LIMIT = 10

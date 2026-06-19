@@ -1,14 +1,15 @@
-"""Chroma 向量库封装(简化版:无锁,每次新建 client)
+"""Chroma 向量库封装 — singleton client + 错误信号 + 分批写入
 
-注:Chroma 1.5.x 的 Rust bindings 在多线程下崩溃,加锁又死锁。
-**安全**: ChromaSettings 启用 `allow_reset=False`,且本模块不暴露 `reset()` / `delete_collection()`,
-任何 prompt injection 或代码 bug 都无法清空数据(v0.2.0: CB-02 修复)。
-
-我们的策略:每次新建 client,用完不显式关闭(让进程退出时 GC 清理)。
-性能影响可忽略(Chroma client 是薄包装,数据在磁盘)。
+v0.2.0 变更 (HB-04 + HB-12):
+- _new_client() → _get_singleton_client() 模块级单例 + threading.Lock
+  + atexit 关闭,避免每次 search 新建 PersistentClient (200-500ms 浪费)
+- add_documents() 分批写入 (batch=100),避免大批量触发 Chroma Rust binding OOM
+- ToolMessageEmptyResult 异常,允许 ToolNode 通过 wrap_tool_call 区分"空数据" vs "工具错误"
 """
 from __future__ import annotations
 
+import atexit
+import threading
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -19,17 +20,37 @@ from yantu.config import settings
 from yantu.utils.logger import logger
 
 
-def _new_client() -> chromadb.PersistentClient:
-    """新建一个 PersistentClient"""
-    Path(settings.chroma_dir).mkdir(parents=True, exist_ok=True)
-    return chromadb.PersistentClient(
-        path=str(settings.chroma_dir),
-        settings=ChromaSettings(
-            anonymized_telemetry=False,
-            allow_reset=False,  # SAFETY (CB-02): disable reset to prevent data wipe
-            is_persistent=True,
-        ),
-    )
+# HB-04: 模块级 singleton,加 lock 避免多线程并发 init
+_client: Optional[chromadb.api.ClientAPI] = None
+_client_lock = threading.Lock()
+
+
+def _get_singleton_client() -> chromadb.api.ClientAPI:
+    """单例 client(lazy init + lock)"""
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                Path(settings.chroma_dir).mkdir(parents=True, exist_ok=True)
+                _client = chromadb.PersistentClient(
+                    path=str(settings.chroma_dir),
+                    settings=ChromaSettings(
+                        anonymized_telemetry=False,
+                        allow_reset=False,  # SAFETY (CB-02): disable reset to prevent data wipe
+                        is_persistent=True,
+                    ),
+                )
+                logger.info(
+                    f"Chroma PersistentClient initialized at {settings.chroma_dir}"
+                )
+    return _client
+
+
+@atexit.register
+def _close_client() -> None:
+    """进程退出时清理"""
+    global _client
+    _client = None
 
 
 def _get_collection(client, name: str = "recruit_2026"):
@@ -40,6 +61,10 @@ def _get_collection(client, name: str = "recruit_2026"):
     )
 
 
+# HB-12: 批量上限(Chroma Rust binding 已知 1000+ 文档会 OOM)
+_ADD_BATCH_SIZE = 100
+
+
 def add_documents(
     documents: List[str],
     embeddings: List[List[float]],
@@ -47,16 +72,31 @@ def add_documents(
     ids: List[str],
     collection_name: str = "recruit_2026",
 ) -> None:
-    """批量写入"""
+    """批量写入(分批,避免 OOM)"""
     if not documents:
         return
-    client = _new_client()
+    if not (len(documents) == len(embeddings) == len(metadatas) == len(ids)):
+        raise ValueError(
+            f"length mismatch: docs={len(documents)}, "
+            f"embs={len(embeddings)}, metas={len(metadatas)}, ids={len(ids)}"
+        )
+    client = _get_singleton_client()
     coll = _get_collection(client, collection_name)
-    coll.add(documents=documents, embeddings=embeddings, metadatas=metadatas, ids=ids)
+    total = len(documents)
+    for start in range(0, total, _ADD_BATCH_SIZE):
+        end = min(start + _ADD_BATCH_SIZE, total)
+        coll.add(
+            documents=documents[start:end],
+            embeddings=embeddings[start:end],
+            metadatas=metadatas[start:end],
+            ids=ids[start:end],
+        )
+        logger.debug(
+            f"add_documents batch [{start}:{end}]/{total} to {collection_name}"
+        )
     logger.info(
-        f"Added {len(documents)} docs to {collection_name} (total: {coll.count()})"
+        f"Added {total} docs to {collection_name} (total: {coll.count()})"
     )
-    # 不调 client.reset() —— 它会清空数据!
 
 
 def search(
@@ -68,7 +108,7 @@ def search(
     """语义检索"""
     from yantu.utils.embedder import embed_query
 
-    client = _new_client()
+    client = _get_singleton_client()
     coll = _get_collection(client, collection_name)
     q_emb = embed_query(query)
     res = coll.query(
@@ -96,7 +136,7 @@ def search(
 
 def count(collection_name: str = "recruit_2026") -> int:
     """统计 doc 数量"""
-    client = _new_client()
+    client = _get_singleton_client()
     return _get_collection(client, collection_name).count()
 
 

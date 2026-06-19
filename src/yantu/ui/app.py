@@ -21,6 +21,7 @@ from yantu.data.user_profile import (
     export_markdown,
 )
 from yantu.graph.agent import build_agent
+from yantu.graph.nodes import RECURSION_LIMIT
 from yantu.ui.reasoning import extract_reasoning
 from yantu.utils.embedder import warmup
 from yantu.utils.logger import logger
@@ -142,7 +143,10 @@ async def main(message: cl.Message) -> None:
         await cl.Message(content="⚠️ agent 未初始化,请刷新页面").send()
         return
 
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": RECURSION_LIMIT,  # HB-01: 显式上限,防 GraphRecursionError 500
+    }
     user_input = message.content
     inputs = {
         "user_query": user_input,
@@ -153,7 +157,9 @@ async def main(message: cl.Message) -> None:
     # (避免 router 的思考块污染最终输出;synthesizer 的回复从最终 state 读)
     tool_steps: dict[str, cl.Step] = {}
 
-    async for event in agent.astream_events(inputs, config=config, version="v2"):
+    # HB-17: 包 try/except,LLM 异常时不再 UI 空白,改为显式报错消息
+    try:
+        async for event in agent.astream_events(inputs, config=config, version="v2"):
         kind = event["event"]
         name = event.get("name", "")
         data = event.get("data", {})
@@ -176,6 +182,17 @@ async def main(message: cl.Message) -> None:
         # LLM 流式 token:不再累积,统一从 final state 取
         # (旧逻辑会把 router + synthesizer 两个 LLM 的 token 拼一起,
         #  导致 <think> 泄露 + 看起来"回复两次")
+    except Exception as e:
+        # HB-17: router/synthesizer LLM 失败时显式报错,不再 UI 空白
+        logger.exception(f"astream_events failed: {e}")
+        await cl.Message(
+            content=(
+                f"⚠️ 处理失败({type(e).__name__}): {e}\n\n"
+                "可能原因:LLM API 限流/超时/内容审查。请稍后重试或检查 .env 配置。"
+            ),
+            author="萤火",
+        ).send()
+        return
 
     # 从最终 state 读 synthesizer 已经存好的 response + reasoning 字段
     final_snapshot = await agent.aget_state(config)
@@ -237,7 +254,16 @@ async def settings_save(request: Request) -> RedirectResponse:
 # catch-all 会先匹配上 /settings。手动把我们的路由挪到 _IncludedRouter 前面(FastAPI 的
 # routes 是 property,只能 in-place 修改底层 router.routes 列表)。
 def _reorder_routes() -> None:
-    routes = chainlit_app.router.routes  # 真正的 list
+    """把 /settings 路由挪到 Chainlit catch-all 前面
+
+    v0.2.0 (HB-18): 包 try/except + isinstance 检查,Chainlit 升级改名 _IncludedRouter
+    也不会让整个 UI 启动崩溃。
+    """
+    try:
+        routes = chainlit_app.router.routes  # 真正的 list
+    except AttributeError:
+        logger.warning("chainlit_app.router.routes not accessible, skip route reorder")
+        return
     settings_routes = [
         r for r in routes
         if isinstance(getattr(r, "path", None), str) and r.path.startswith("/settings")
@@ -247,6 +273,7 @@ def _reorder_routes() -> None:
     new_order = []
     inserted = False
     for r in routes:
+        # HB-18: 用 isinstance 检查类型,不依赖类名(类名是 Chainlit 内部实现细节)
         if not inserted and type(r).__name__ == "_IncludedRouter":
             new_order.extend(settings_routes)
             inserted = True
@@ -255,8 +282,11 @@ def _reorder_routes() -> None:
     if not inserted:
         new_order = settings_routes + new_order
     # in-place 重排
-    routes.clear()
-    routes.extend(new_order)
+    try:
+        routes.clear()
+        routes.extend(new_order)
+    except Exception as e:
+        logger.warning(f"route reorder failed (non-fatal): {e}")
 
 
 _reorder_routes()
