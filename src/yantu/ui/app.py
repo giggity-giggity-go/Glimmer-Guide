@@ -160,28 +160,28 @@ async def main(message: cl.Message) -> None:
     # HB-17: 包 try/except,LLM 异常时不再 UI 空白,改为显式报错消息
     try:
         async for event in agent.astream_events(inputs, config=config, version="v2"):
-        kind = event["event"]
-        name = event.get("name", "")
-        data = event.get("data", {})
+            kind = event["event"]
+            name = event.get("name", "")
+            data = event.get("data", {})
 
-        # Tool 启动:开 step
-        if kind == "on_tool_start":
-            step = cl.Step(name=name, type="tool")
-            step.input = str(data.get("input", {}))
-            await step.__aenter__()
-            tool_steps[name] = step
+            # Tool 启动:开 step
+            if kind == "on_tool_start":
+                step = cl.Step(name=name, type="tool")
+                step.input = str(data.get("input", {}))
+                await step.__aenter__()
+                tool_steps[name] = step
 
-        # Tool 结束:写输出,关 step
-        elif kind == "on_tool_end":
-            step = tool_steps.get(name)
-            if step:
-                output = str(data.get("output", ""))[:1500]
-                step.output = output
-                await step.__aexit__(None, None, None)
+            # Tool 结束:写输出,关 step
+            elif kind == "on_tool_end":
+                step = tool_steps.get(name)
+                if step:
+                    output = str(data.get("output", ""))[:1500]
+                    step.output = output
+                    await step.__aexit__(None, None, None)
 
-        # LLM 流式 token:不再累积,统一从 final state 取
-        # (旧逻辑会把 router + synthesizer 两个 LLM 的 token 拼一起,
-        #  导致 <think> 泄露 + 看起来"回复两次")
+            # LLM 流式 token:不再累积,统一从 final state 取
+            # (旧逻辑会把 router + synthesizer 两个 LLM 的 token 拼一起,
+            #  导致 <think> 泄露 + 看起来"回复两次")
     except Exception as e:
         # HB-17: router/synthesizer LLM 失败时显式报错,不再 UI 空白
         logger.exception(f"astream_events failed: {e}")
