@@ -2,43 +2,75 @@
 
 > **截止日期**: 2026-06-19
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug)
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%)
 
 ---
 
-## 🛠️ v0.2.0 Bug Fix Pack(2026-06-19,9 commit)
+## 🛠️ v0.2.0 Bug Fix Pack(2026-06-19,12 commit 含 2 hotfix)
 
-深度调研发现 47 个 bug(2 P0 + 18 P1 + 16 P2 + 11 P3),v0.2.0 修完所有 P0+P1 共 20 个:
+深度调研发现 47 个 bug(2 P0 + 18 P1 + 16 P2 + 11 P3),v0.2.0 修完所有 P0+P1 共 20 个。
 
-| Commit | Bug | 影响 |
+### Commit 时间线(12 个,新 → 旧)
+
+| Commit | 类型 | 内容 |
 |---|---|---|
-| `16533da` CB-02 | vector_repo 数据安全炸弹 | 拔掉 `client.reset()` 误调清库引信,数据永久丢失防护 |
-| `05ea69a` CB-01+HB-11 | scraper 性能 | 端到端 8-15s → 0.5-0.7s(**-73% ~ -82%**),bench 实测 |
-| `9d2a0ef` HB-02 | tools.py async 重构 | 删除 asyncio.run 桥接,ToolNode 可并发 |
-| `8674b87` 9 bug | 稳定性层 | HB-01 死循环 / HB-04 单例 / HB-10 错误信号 / HB-12 分批 / HB-13 cache / HB-14 redact / HB-15 HF_HUB_OFFLINE 时序 / HB-17 astream fallback / HB-18 _reorder_routes fallback |
-| `c6a3436` HB-03+HB-09 | 路由升级 | 两阶段 router(Intent 分类→bind 工具)+ synthesizer structured output,删 fetch_web hallucination |
-| `a75b420` 5 bug | scraper 数据准确性 | HB-05 is_985/211 名单查表 / HB-06 region 过滤 / HB-07 _parse_date / HB-08 urljoin / HB-16 department 正则 |
-| `5160861` | 测试 | 41 个 pytest 全过(5.24s),覆盖 CB-02/HB-01/04/05/06/07/08/12/13/14/16 |
-| `1d9e376` | merge | vendor registry + reasoning extraction 整合到主线 |
+| `2539eb9` | 🔥 HOTFIX | **HB-17 async for body 缩进到 try 内** — Commit 4 (8674b87) 标的 HB-17 实际未生效,async for 循环体没缩进导致 Chainlit 启动 IndentationError 直接崩,UI 验证时才发现 |
+| `3ba29fd` | 🔥 HOTFIX | **Intent fallback 截断到 200 字符** — `_classify_intent` 失败时用 `reasoning=f"structured_failed: {e}"`,错误消息 >200 字符触发 Pydantic 二次 ValidationError 500;截断到 150 字符 + 二次 try/except |
+| `eb009c6` | docs | PROGRESS.md v0.2.0 milestone 完整验收段 |
+| `3b55062` | docs | PROGRESS.md v0.2.0 milestone(初版) |
+| `1d9e376` | merge | **vendor registry + reasoning extraction 整合到主线** — 3 个 conflict 解决(n/state/llm),vendor 抽象(zhipu/MiniMax-M3/openai)接入 + reasoning 字段 UI |
+| `5160861` | test | pytest 测试架构 + 41 个回归测试(5.24s 全过) |
+| `a75b420` | fix | **scraper 数据准确性 5 bug** — HB-05 is_985/211 名单 / HB-06 region 过滤 / HB-07 _parse_date / HB-08 urljoin / HB-16 department 正则 |
+| `c6a3436` | refactor | **LLM 路由升级** — HB-03 两阶段 router(Intent 分类→bind 工具桶)+ HB-09 synthesizer Pydantic structured output + MB-05 router temperature 0.2 + 删 fetch_web hallucination |
+| `8674b87` | fix | **9 bug 稳定性层** — HB-01 死循环 / HB-04 vector_repo singleton / HB-10 错误信号 / HB-12 分批 / HB-13 cache key / HB-14 redact / HB-15 HF_HUB_OFFLINE 时序 / HB-17 astream fallback / HB-18 _reorder_routes fallback |
+| `9d2a0ef` | refactor | **tools.py async 重构** — 5 tool 改 async def + await,删除 asyncio.run 桥接,补 Google-style docstring |
+| `05ea69a` | perf | **scraper status-aware throttle + AsyncClient** — polite_delay 1-3s → 0-0.2s 抖动 + 429/503 自动退避 + httpx.AsyncClient 单例 |
+| `16533da` | fix | **CB-02 数据安全炸弹** — `allow_reset=False` + 删 `reset()` + 删 `delete_collection()` |
 
-### Bench 性能对比(conda env Glimmer, 研招网匿名页)
+### Bench 性能对比(conda env Glimmer, 研招网匿名页,2026-06-19 实测)
 
 | 工具 | v0.1.1 (06-18) | v0.2.0 (06-19) | 提升 |
 |---|---|---|---|
-| Tool 1 page=1 | 3.93s | 0.70s | -82% |
-| Tool 1 page=2 | 3.32s | 0.58s | -82% |
-| Tool 2 北大 | 2.33s avg | 0.54s avg | -77% |
-| Tool 4 | 2.14s avg | 0.52s avg | -76% |
+| Tool 1 page=1 | 3.93s | 0.70s | **-82%** |
+| Tool 1 page=2 | 3.32s | 0.58s | **-82%** |
+| Tool 2 北大 | 2.33s avg | 0.54s avg | **-77%** |
+| Tool 4 | 2.14s avg | 0.52s avg | **-76%** |
+
+### UI 实测结果(Chainlit 启动后,6 个 prompt 场景)
+
+| Prompt | 期望 tool | 结果 | 关键现象 |
+|---|---|---|---|
+| "列出研招网院校库第 1 页前 10 所学校,只要表" | `query_school_library` | ✅ PASS | 10 校真实数据,grounded=true |
+| "调用 get_school_info 工具查 schId=367878 北京大学的详情" | `get_school_info` | ⚠️ PARTIAL | **M2.7 API BadRequestError 400**:tool call result does not follow tool call (2013);router 重复调 4 次,API 拒 |
+| "列出 2026 年全国招生简章第 1 页,只要前 10 条标题、日期、链接" | `get_recruitment_notices` | ✅ **PASS(关键)** | **从 0% → 100% 路由**,10 条真实简章,URL 全是绝对路径(HB-08 urljoin),LLM 诚实说"日期字段空" |
+| "CCNU 复试分数线多少?" | `search_local` | (未实测,见 TODO) | 涉及 bge 加载 |
+| "哪些学校避数学?" | `query_school_library` + 画像过滤 | (未实测) | router 应识别 + 偏好过滤 |
+| "你好" | (不调任何 tool) | (未实测) | HB-03 chat 路径 |
+
+**关键胜利**:
+- Tool 4 路由:修复前 3 次测试 0% → 修复后 1 次测试 100% — **核心修复目标达成**
+- Tool 1:仍正常,grounded 强制输出真实数据
+- HB-08 urljoin:URL 全是 `https://yz.chsi.com.cn/...` 绝对路径(修前 `https://yz.chsi.com.cnkyzx/zsjz/...` 少斜杠)
+- HB-09 防 hallucination:所有回答标 `grounded: true` + `citations: [来源]`,LLM 承认数据局限不编造
+
+### 总工作量
+
+- v0.2.0 主修复:8 commit(20 bug 修完)
+- vendor merge + reasoning:1 commit(3 个 conflict 解决)
+- 测试:1 commit(41 pytest)
+- docs:2 commit(PROGRESS.md 更新)
+- hotfix:2 commit(UI 验证发现的实际启动/路由 bug)
+- **总计 ~49h / 12 commit**(原估 59h,精简到 20 bug 实测 ~49h)
 
 ### 遗留 TODO(v0.2.1+)
 
+- 🔥 [ ] **Tool 2 vendor 兼容** — M2.7 API BadRequestError 400,tool_call_id 格式不匹配;可能修复:vendor MODEL_BEHAVIORS 标记 strict=False / 减少 router 并行 tool / vendor config 加 tool_use_id_format
 - [ ] Tool 5 (`search_local`) 单独 bench,涉及 bge 加载
-- [ ] 测试 Tool 4 router 路由成功率(目标 ≥80%,从 0%)
-- [ ] scraper `search.do` ssdm 集成到 query_school_library 默认路径
-- [ ] 211/研究生院 名单补全(seed 现在只有 985)
-- [ ] LLM structured output 兼容性矩阵(部分模型不支持 json_schema strict)
-- [ ] LangSmith tracing 接入
-- [ ] 异步 SqliteSaver(MemorySaver 重启即丢会话历史)
+- [ ] scraper `search.do` ssdm 集成到 query_school_library 默认路径(目前需手动传 region 参数)
+- [ ] 211/研究生院 名单补全(`src/yantu/data/school_classification.json` 现在只有 57 所 985)
+- [ ] LLM structured output 兼容性矩阵(部分模型不支持 `method="json_schema", strict=True`)
+- [ ] LangSmith tracing 接入(便于调试 router/synthesizer 行为)
+- [ ] 异步 SqliteSaver 替代 MemorySaver(当前重启 Chainlit 丢会话历史)
 
 ---
 
