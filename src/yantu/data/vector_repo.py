@@ -1,7 +1,8 @@
 """Chroma 向量库封装(简化版:无锁,每次新建 client)
 
 注:Chroma 1.5.x 的 Rust bindings 在多线程下崩溃,加锁又死锁。
-**绝对不能**调 `client.reset()` —— 它会**清空数据库**!
+**安全**: ChromaSettings 启用 `allow_reset=False`,且本模块不暴露 `reset()` / `delete_collection()`,
+任何 prompt injection 或代码 bug 都无法清空数据(v0.2.0: CB-02 修复)。
 
 我们的策略:每次新建 client,用完不显式关闭(让进程退出时 GC 清理)。
 性能影响可忽略(Chroma client 是薄包装,数据在磁盘)。
@@ -25,7 +26,7 @@ def _new_client() -> chromadb.PersistentClient:
         path=str(settings.chroma_dir),
         settings=ChromaSettings(
             anonymized_telemetry=False,
-            allow_reset=True,
+            allow_reset=False,  # SAFETY (CB-02): disable reset to prevent data wipe
             is_persistent=True,
         ),
     )
@@ -99,8 +100,5 @@ def count(collection_name: str = "recruit_2026") -> int:
     return _get_collection(client, collection_name).count()
 
 
-def reset(collection_name: str = "recruit_2026") -> None:
-    """清空 collection(调试用,真删数据)"""
-    client = _new_client()
-    client.delete_collection(collection_name)
-    logger.warning(f"Collection {collection_name} deleted")
+# SAFETY (CB-02): reset() and delete_collection() are intentionally NOT exposed.
+# To wipe data, manually delete the chroma_dir directory on disk.
