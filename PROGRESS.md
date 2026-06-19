@@ -2,6 +2,7 @@
 
 > **截止日期**: 2026-06-19
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
+> **当前 vendor**: `minimax / MiniMax-M2.7-highspeed`(2026-06-19 切换,zhipu 1214 错误绕开)
 > **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试)
 
 ---
@@ -65,12 +66,15 @@
 ### 遗留 TODO(v0.2.1+)
 
 - 🔥 [ ] **Tool 2 vendor 兼容** — M2.7 API BadRequestError 400,tool_call_id 格式不匹配;可能修复:vendor MODEL_BEHAVIORS 标记 strict=False / 减少 router 并行 tool / vendor config 加 tool_use_id_format
+- 🔥 [ ] **MiniMax-M3 `reasoning_split` 修复** — `model_kwargs={"reasoning_split": True}` 被 OpenAI SDK 拒绝(TypeError),需要改 `extra_body={"reasoning_split": True}`(LangChain 官方推荐 vendor-specific 参数走 extra_body)+ `vendors.py` 字段名 `model_kwargs` → `extra_body` + `llm.py` cache key 包含 extra_body(否则切 vendor cache 失效)
+- [ ] zhipu Intent classifier 1214 错误绕过 — `function_calling` 在 glm-5.1 报 BadRequestError,zhipu 端需用其原生接口(非 OpenAI 兼容协议),降级 TODO;短期方案是接受 fallback 到 `target="both"`(Router LLM 自己判断 tool_calls,实测 4/4 走通)
 - [ ] Tool 5 (`search_local`) 单独 bench,涉及 bge 加载
 - [ ] scraper `search.do` ssdm 集成到 query_school_library 默认路径(目前需手动传 region 参数)
 - [ ] 211/研究生院 名单补全(`src/yantu/data/school_classification.json` 现在只有 57 所 985)
-- [ ] ~~LLM structured output 兼容性矩阵(部分模型不支持 `method="json_schema", strict=True`)~~ → v0.2.1 已修,统一改 `method="function_calling"`
+- [x] LLM structured output 兼容性矩阵(部分模型不支持 `method="json_schema", strict=True`) → v0.2.1 已修,统一改 `method="function_calling"`(但 Intent classifier 在 zhipu 仍坏,见上)
 - [ ] LangSmith tracing 接入(便于调试 router/synthesizer 行为)
 - [ ] 异步 SqliteSaver 替代 MemorySaver(当前重启 Chainlit 丢会话历史)
+- [ ] minimax M2.7-highspeed v0.2.1 UI 实测(切回 minimax vendor 后 4 prompt 验证)
 
 ---
 
@@ -114,12 +118,24 @@ glm-5.1 fallback **永远**输出 fence JSON,但当 query 让 LLM 在 fence 前�
 
 **4/4 全部干净返回 markdown 渲染的中文回答**,无 JSON 文本。
 
-### 已知遗留(zhipu 1214 错误)
-- Intent classifier `function_calling` 在 glm-5.1(zhipu)上报 `BadRequestError code 1214 messages 参数非法`,仍然 fallback 到 `target="both"`(v0.2.0 hotfix 3ba29fd 生效)
-- Synthesizer `function_calling` 在 glm-5.1 上 100% 成功(实测 4/4)
-- Router `bind_tools` 成功,L2 router LLM 自己判断 tool_calls(本次实测全部走通)
+### Vendor 兼容性矩阵(v0.2.1 实测,2026-06-19)
+
+| Vendor | Model | Intent `function_calling` | Synthesizer `function_calling` | Router `bind_tools` | UI 实测 (4 prompt) |
+|---|---|---|---|---|---|
+| **minimax** | M2.7-highspeed | (待实测) | (待实测) | (待实测) | (待实测) |
+| minimax | M2.7 | (历史 401) | (历史 401) | (历史 401) | n/a (key 失效) |
+| minimax | M3 | ❌ TypeError(reasoning_split) | ❌ TypeError | ❌ TypeError | n/a (需要 `extra_body` 修复) |
+| zhipu | glm-5.1 | ❌ BadRequestError 1214 | ✅ 200 OK | ✅ 200 OK | ✅ 4/4 干净(实测 309/444/374/361 字符) |
+
+#### 已知问题
+
+- **Intent classifier `function_calling` 在 zhipu glm-5.1 上 1214 错误**:仍然 fallback 到 `target="both"`(v0.2.0 hotfix 3ba29fd 生效)
+- **MiniMax-M3 `reasoning_split=True` 被 OpenAI SDK 拒绝**:需要把 `model_kwargs` 改 `extra_body`(v0.2.0 PROGRESS.md TODO 标的 P1 项,本 plan 不在范围内)
 - **副作用**:greeting 类 chat intent 现在变成 "both"(5 个 tool 都给 LLM),但 LLM 自己决定不调 → 实际无 tool 调用 → 直接 synthesize → 干净回答
-- **真要修**:zhipu 端需要用其原生 `with_structured_output` 接口(非 OpenAI 兼容协议),或换 vendor。降级为后续 TODO。
+- **zhipu 真要修 Intent 1214**:zhipu 端需要用其原生 `with_structured_output` 接口(非 OpenAI 兼容协议),降级为后续 TODO
+
+#### minimax M2.7-highspeed 实测(2026-06-19,切换后待补)
+切换到 minimax vendor + M2.7-highspeed 后,需要重新跑 4-prompt UI 验证。当前 key 是 v0.2.0 期间用过的 `sk-cp-quf7...`,预期 `function_calling` 在 minimax 端可工作(实测 deep-research w9ycuvps4 阶段 `function_calling_works=true`)。**待补实测结果**。
 
 ---
 
