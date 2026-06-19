@@ -6,6 +6,42 @@
 
 ---
 
+## 🛠️ v0.2.0 Bug Fix Pack(2026-06-19,9 commit)
+
+深度调研发现 47 个 bug(2 P0 + 18 P1 + 16 P2 + 11 P3),v0.2.0 修完所有 P0+P1 共 20 个:
+
+| Commit | Bug | 影响 |
+|---|---|---|
+| `16533da` CB-02 | vector_repo 数据安全炸弹 | 拔掉 `client.reset()` 误调清库引信,数据永久丢失防护 |
+| `05ea69a` CB-01+HB-11 | scraper 性能 | 端到端 8-15s → 0.5-0.7s(**-73% ~ -82%**),bench 实测 |
+| `9d2a0ef` HB-02 | tools.py async 重构 | 删除 asyncio.run 桥接,ToolNode 可并发 |
+| `8674b87` 9 bug | 稳定性层 | HB-01 死循环 / HB-04 单例 / HB-10 错误信号 / HB-12 分批 / HB-13 cache / HB-14 redact / HB-15 HF_HUB_OFFLINE 时序 / HB-17 astream fallback / HB-18 _reorder_routes fallback |
+| `c6a3436` HB-03+HB-09 | 路由升级 | 两阶段 router(Intent 分类→bind 工具)+ synthesizer structured output,删 fetch_web hallucination |
+| `a75b420` 5 bug | scraper 数据准确性 | HB-05 is_985/211 名单查表 / HB-06 region 过滤 / HB-07 _parse_date / HB-08 urljoin / HB-16 department 正则 |
+| `5160861` | 测试 | 41 个 pytest 全过(5.24s),覆盖 CB-02/HB-01/04/05/06/07/08/12/13/14/16 |
+| `1d9e376` | merge | vendor registry + reasoning extraction 整合到主线 |
+
+### Bench 性能对比(conda env Glimmer, 研招网匿名页)
+
+| 工具 | v0.1.1 (06-18) | v0.2.0 (06-19) | 提升 |
+|---|---|---|---|
+| Tool 1 page=1 | 3.93s | 0.70s | -82% |
+| Tool 1 page=2 | 3.32s | 0.58s | -82% |
+| Tool 2 北大 | 2.33s avg | 0.54s avg | -77% |
+| Tool 4 | 2.14s avg | 0.52s avg | -76% |
+
+### 遗留 TODO(v0.2.1+)
+
+- [ ] Tool 5 (`search_local`) 单独 bench,涉及 bge 加载
+- [ ] 测试 Tool 4 router 路由成功率(目标 ≥80%,从 0%)
+- [ ] scraper `search.do` ssdm 集成到 query_school_library 默认路径
+- [ ] 211/研究生院 名单补全(seed 现在只有 985)
+- [ ] LLM structured output 兼容性矩阵(部分模型不支持 json_schema strict)
+- [ ] LangSmith tracing 接入
+- [ ] 异步 SqliteSaver(MemorySaver 重启即丢会话历史)
+
+---
+
 ## 🎯 项目目标
 
 为 2026 考研人(用户画像:政英 127 / 数学 29 / 408 47 / 095136 农信专硕)打造的**个人助理级**智能体,聚焦"报名前"的预研:
