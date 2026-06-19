@@ -1,8 +1,8 @@
 # 研途萤火(yantu)项目进度
 
-> **截止日期**: 2026-06-18
+> **截止日期**: 2026-06-19
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug)
 
 ---
 
