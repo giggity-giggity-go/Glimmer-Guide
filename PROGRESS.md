@@ -479,6 +479,16 @@ langgraph dev --config studio/langgraph.json
 - **解决**: 用 loguru 风格 `logger.remove()` + `logger.add(..., level="WARNING")`
 - **教训**: 项目用 loguru 时,任何调试脚本关日志必须走 loguru API
 
+### 🆕 Bug 13: PyCharm Run Configuration 漏 HF_HUB_OFFLINE 等环境变量(2026-06-19 实测)
+- **症状**: PyCharm 启动 chainlit 后,(a) Settings 按钮 UI 异常(⚙️ 图标缺失) (b) Tool call step 不显示 (`on_tool_start` event 没注册) (c) `.env` 没加载 → 后端日志显示 `key_present=False` 或 vendor 走 zhipu 默认
+- **原因**: PyCharm Run Configuration 默认只设 `PYTHONUNBUFFERED=1`,缺 3 个关键 env vars:
+  - `HF_HUB_OFFLINE=1` → bge 加载卡 60s+(`SentenceTransformer` 启动时 HEAD huggingface.co 验证 metadata)
+  - `TRANSFORMERS_OFFLINE=1` → 同上,sentence_transformers 还要查这个
+  - `SENTENCE_TRANSFORMERS_HOME=D:\WORKSTATION\Glimmer Guide\models` → 不指本地 cache 目录,sentence_transformers 会找错位置
+- **解决**: PyCharm Run → Edit Configurations → 选 `app` → Environment variables 填 `PYTHONUNBUFFERED=1;HF_HUB_OFFLINE=1;TRANSFORMERS_OFFLINE=1;SENTENCE_TRANSFORMERS_HOME=D:\WORKSTATION\Glimmer Guide\models`,**Working directory 必须用项目根**(`D:\WORKSTATION\Glimmer Guide`,不是 `src\yantu\ui`),**`.env` 文件路径**必须显式填 `D:/WORKSTATION/Glimmer Guide/.env`
+- **验证**: 启动后立即看后端第一行 `LLM resolved: vendor=... base_url=... key_present=True`(key_present=True 证明 .env 加载成功)
+- **教训**: PyCharm Run Configuration **不会**自动继承项目级 env vars;terminal 里 `export` 的 env 在 PyCharm Run 里**不生效**(PyCharm 用独立 env);bug 表现隐蔽(不是崩溃,只是行为异常)
+
 ---
 
 ## 🎯 v0.1.0 MVP 验收(用户实操 2026-06-16 实测)
@@ -615,7 +625,7 @@ D:\WORKSTATION\Glimmer Guide\
 ## ⚠️ 已知限制 & 后续 TODO
 
 ### 已知限制
-1. **HF_HUB_OFFLINE 必设**:启动 chainlit / studio 都必须设 3 个环境变量,否则 bge 加载卡 60s+(见 Bug 10)
+1. **HF_HUB_OFFLINE 必设**:启动 chainlit / studio 都必须设 3 个环境变量,否则 bge 加载卡 60s+(见 Bug 10);**PyCharm Run Configuration 漏设是 2026-06-19 实测高频踩坑**(见 Bug 13),务必在 Run → Edit Configurations → Environment variables 显式填
 2. **ChromDB 写入**: vector_repo 当前是只读 in-memory 模式,新增 chunks 需要重启 Chainlit
 3. **LangGraph 持久化**: 用 MemorySaver,重启 Chainlit 丢会话
 4. **API key**: 用户的 key 已在对话历史中泄露过,**应作废旧 key 并生成新 key**
@@ -677,7 +687,23 @@ chainlit run src/yantu/ui/app.py
 
 ### PyCharm 跑 app.py
 
-Run → Edit Configurations → 选 Chainlit 配置 → Environment variables → 加上面 3 个变量。
+Run → Edit Configurations → 选 `app` 配置 → 改下面 3 个字段:
+
+| 字段 | 值 |
+|---|---|
+| **Working directory** | `D:\WORKSTATION\Glimmer Guide`(项目根,不要用 `src\yantu\ui`!) |
+| **Environment variables** | `PYTHONUNBUFFERED=1;HF_HUB_OFFLINE=1;TRANSFORMERS_OFFLINE=1;SENTENCE_TRANSFORMERS_HOME=D:\WORKSTATION\Glimmer Guide\models` |
+| **.env file path** | `D:/WORKSTATION/Glimmer Guide/.env` |
+| **Python interpreter** | Project default (Python 3.11) = `D:\ProgramData\Anaconda_envs\envs\Glimmer\python.exe` |
+| **Script path** | `D:/WORKSTATION/Glimmer Guide/src/yantu/ui/app.py` |
+| **Add content roots to PYTHONPATH** | ✅ 勾选 |
+
+**3 个常见踩坑**(见 Bug 13):
+1. **漏 HF_HUB_OFFLINE=1** → bge 加载卡 60s+ 不返回,Tool call step 不显示(`on_tool_start` event 注册失败)
+2. **Working directory 用 `src\yantu\ui\`** → `.env` 找不到(vendor/API key 走 default)+ `.chainlit/config.toml` 找不到(⚙️ 设置按钮 UI 异常)+ Tool call step 不显示
+3. **漏 .env 路径** → 同上
+
+**判断是否配错**:启动后立即看后端日志第一行,应该看到 `LLM resolved: vendor=minimax (MiniMax) model=MiniMax-M3 base_url=https://api.minimaxi.com/v1 key_present=True`。如果 `key_present=False` 或 vendor 是 `zhipu`(默认),说明 .env 没加载。
 
 ### Studio 可视化(本次新增)
 
