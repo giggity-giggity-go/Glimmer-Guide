@@ -112,9 +112,16 @@ def _classify_intent(query: str) -> Intent:
             SystemMessage(content=INTENT_PROMPT.format(query=query)),
         ])
     except Exception as e:
-        logger.warning(f"Intent structured output failed: {e}, fallback to both")
-        # 降级:返回 both 让 router 自选
-        return Intent(target="both", confidence=0.5, reasoning=f"structured_failed: {e}")
+        # Bug 修复: 错误消息本身可能 >200 字符,直接构造会触发 Pydantic 验证
+        # 兜底:截断到 150 字符(留余量),target 默认 both 让 router 自选
+        logger.warning(f"Intent structured output failed: {type(e).__name__}, fallback to both")
+        err_short = (str(e)[:150] + "...") if len(str(e)) > 150 else str(e)
+        try:
+            return Intent(target="both", confidence=0.5, reasoning=f"fallback: {err_short}")
+        except Exception as e2:
+            # 万一 Pydantic 又校验失败,返回最简 Intent
+            logger.error(f"Fallback Intent validation also failed: {e2}")
+            return Intent(target="both", confidence=0.0, reasoning="fallback")
 
 
 def make_router_node():
