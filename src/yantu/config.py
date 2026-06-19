@@ -45,6 +45,7 @@ class Settings:
     yanzhao_base_url: str
     scraper_min_delay: float
     scraper_max_delay: float
+    scraper_throttle_backoff: float
     scraper_user_agent: str
 
     # Embedding
@@ -71,8 +72,12 @@ def load_settings() -> Settings:
         chroma_dir=_path("CHROMA_DIR", "./data/chroma"),
         sqlite_path=_path("SQLITE_PATH", "./data/yanzhao.db"),
         yanzhao_base_url=os.getenv("YANZHAO_BASE_URL", "https://yz.chsi.com.cn"),
-        scraper_min_delay=float(os.getenv("SCRAPER_MIN_DELAY", "1.5")),
+        # v0.2.0 (CB-01): 默认 1.0-3.0s,只在 429/503 时强制执行;正常路径走 0-0.2s 抖动
+        # 旧默认 1.5-3.0 是过度防御,实测研招网不限速
+        scraper_min_delay=float(os.getenv("SCRAPER_MIN_DELAY", "1.0")),
         scraper_max_delay=float(os.getenv("SCRAPER_MAX_DELAY", "3.0")),
+        # CB-01: 触发节流后强制 sleep 的时长
+        scraper_throttle_backoff=float(os.getenv("SCRAPER_THROTTLE_BACKOFF", "5.0")),
         scraper_user_agent=os.getenv(
             "SCRAPER_USER_AGENT",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
