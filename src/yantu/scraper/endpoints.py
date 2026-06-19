@@ -13,16 +13,144 @@
 - /zsgs/ 信息公开 → 登录
 
 本项目严格只爬匿名可达数据,符合"信息查询"边界。
+
+v0.2.0 变更 (HB-05/06/07/08/16):
+- HB-07: _parse_date() helper 处理 5 种日期格式,返回 ISO
+- HB-08: 用 urljoin 替代 startswith("/"),过滤放宽到 "zsjz/"
+- HB-16: department 正则非贪婪 + 包含 "教育厅/省人民政府"
+- HB-05: 用 school_classifier 名单查表替换关键词匹配(可选)
+- HB-06: query_school_library 支持 region 参数,调 /sch/search.do?ssdm=X
 """
 from __future__ import annotations
 
+import json
 import re
+from datetime import date, datetime
+from pathlib import Path
 from typing import List, Dict, Any, Optional
-from urllib.parse import quote
+from urllib.parse import urljoin
 
 from parsel import Selector
 
 from yantu.config import settings
+from yantu.scraper import client
+from yantu.utils.logger import logger
+
+
+# ==================== HB-08: URL 拼接 + BASE 常量 ====================
+
+BASE = settings.yanzhao_base_url.rstrip("/") + "/"
+
+
+# ==================== HB-07: 日期解析(5 种格式) ====================
+
+_DATE_PATTERNS = [
+    # ISO with time: 2025-09-15 14:30 or 2025-09-15T14:30
+    re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})"),
+    # ISO date: 2025-09-15
+    re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})"),
+    # Slash: 2025/09/15
+    re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})"),
+    # Dot: 2025.09.15
+    re.compile(r"^(\d{4})\.(\d{1,2})\.(\d{1,2})"),
+    # Chinese: 2025年9月15日
+    re.compile(r"^(\d{4})年(\d{1,2})月(\d{1,2})日"),
+]
+
+
+def _parse_date(raw: str) -> Optional[str]:
+    """HB-07: 解析 5 种日期格式,返回 ISO date string;失败返 None"""
+    if not raw:
+        return None
+    raw = raw.strip()
+    for pat in _DATE_PATTERNS:
+        m = pat.match(raw)
+        if m:
+            try:
+                groups = m.groups()
+                y, mo, d = int(groups[0]), int(groups[1]), int(groups[2])
+                if len(groups) == 5:
+                    # 含时间
+                    h, mi = int(groups[3]), int(groups[4])
+                    return datetime(y, mo, d, h, mi).isoformat()
+                return date(y, mo, d).isoformat()
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
+# ==================== HB-16: department 解析(非贪婪 + 多种后缀) ====================
+
+# 非贪婪 [一-龥]+? + 多种部门后缀,支持教育部 / 工业和信息化部 / 省教育厅 / 省人民政府
+_DEPT_RE = re.compile(
+    r"主管部门[：:]\s*([一-龥]{2,15}?(?:部|委|厅|局|人民政府))"
+)
+
+
+# ==================== HB-06: province ssdm 映射 ====================
+
+_PROVINCE_SSDM = {
+    "北京": "11", "天津": "12", "河北": "13", "山西": "14", "内蒙古": "15",
+    "辽宁": "21", "吉林": "22", "黑龙江": "23", "上海": "31", "江苏": "32",
+    "浙江": "33", "安徽": "34", "福建": "35", "江西": "36", "山东": "37",
+    "河南": "41", "湖北": "42", "湖南": "43", "广东": "44", "广西": "45",
+    "海南": "46", "重庆": "50", "四川": "51", "贵州": "52", "云南": "53",
+    "西藏": "54", "陕西": "61", "甘肃": "62", "青海": "63", "宁夏": "64",
+    "新疆": "65", "台湾": "71", "香港": "81", "澳门": "82",
+}
+
+
+# ==================== HB-05: 院校分类器(加载 seed 名单) ====================
+
+_CLASSIFIER_CACHE: Optional[Dict[str, Dict[str, bool]]] = None
+
+
+def _load_classifier() -> Dict[str, Dict[str, bool]]:
+    """加载 src/yantu/data/school_classification.json,缓存在内存"""
+    global _CLASSIFIER_CACHE
+    if _CLASSIFIER_CACHE is None:
+        # 注:这里用 src/yantu/data/ 而非 settings.seed_dir,因为 seed/ 被 .gitignore 排除
+        # endpoints.py 路径: src/yantu/scraper/endpoints.py → parents[3] = 项目根
+        path = Path(__file__).resolve().parents[3] / "src" / "yantu" / "data" / "school_classification.json"
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            _CLASSIFIER_CACHE = {}
+            for school in data.get("985_projects", []):
+                _CLASSIFIER_CACHE.setdefault(school, {})["is_985"] = True
+            for school in data.get("211_projects", []):
+                _CLASSIFIER_CACHE.setdefault(school, {})["is_211"] = True
+            for school in data.get("yanjiusheng_yuan", []):
+                _CLASSIFIER_CACHE.setdefault(school, {})["is_yjy"] = True
+            logger.info(
+                f"School classifier loaded: "
+                f"{len(data.get('985_projects',[]))} 985 + "
+                f"{len(data.get('211_projects',[]))} 211 + "
+                f"{len(data.get('yanjiusheng_yuan',[]))} yjy"
+            )
+        else:
+            logger.warning(
+                f"school_classification.json not found at {path}, "
+                f"fallback to text-matching (HB-05 partial fix)"
+            )
+            _CLASSIFIER_CACHE = {}
+    return _CLASSIFIER_CACHE
+
+
+def _classify_school(name: str) -> Dict[str, bool]:
+    """HB-05: 用名单查表,fallback 到关键词匹配"""
+    cache = _load_classifier()
+    if name in cache:
+        return {
+            "is_985": cache[name].get("is_985", False),
+            "is_211": cache[name].get("is_211", False),
+            "is_yjy": cache[name].get("is_yjy", False),
+        }
+    # fallback to text match (legacy behavior)
+    return {
+        "is_985": False,  # legacy "自划线" 匹配语义错位,默认 False
+        "is_211": False,  # legacy "双一流+研究生院" 匹配语义错位,默认 False
+        "is_yjy": False,
+    }
 from yantu.scraper import client
 from yantu.utils.logger import logger
 
@@ -44,8 +172,13 @@ async def query_school_library(
         失败/空页时返回 [{"error": "...", "tool": "query_school_library", "page": N}](HB-10 修复)
     """
     start = (page - 1) * 20
-    url = f"{settings.yanzhao_base_url}/sch/"
-    params = {"start": start}
+    # HB-06: region 走 /sch/search.do?ssdm=X 精准返回该省学校 + city 自动填该省
+    if region and region in _PROVINCE_SSDM:
+        url = f"{settings.yanzhao_base_url}/sch/search.do"
+        params = {"ssdm": _PROVINCE_SSDM[region], "start": start}
+    else:
+        url = f"{settings.yanzhao_base_url}/sch/"
+        params = {"start": start}
     resp = await client.get(url, params=params)
     if resp.status_code != 200:
         logger.error(f"query_school_library status={resp.status_code}")
@@ -93,21 +226,20 @@ async def query_school_library(
             near_text,
         )
         city = cities[0] if cities else ""
-        # 主管部门
-        dept_m = re.search(r"主管部门[：:]?\s*([一-龥]+(?:部|委|厅|局))", near_text)
-        is_211 = "双一流" in near_text or "研究生院" in near_text
-        is_985 = "自划线" in near_text
-        is_yjy = "研究生院" in near_text
+        # HB-16: 主管部门正则非贪婪 + 包含 "教育厅/省人民政府"
+        dept_m = _DEPT_RE.search(near_text)
+        # HB-05: 用名单查表替换关键词匹配
+        cls = _classify_school(name)
         out.append(
             {
                 "school_id": sid,
                 "name": name,
                 "city": city,
                 "department": dept_m.group(1) if dept_m else "",
-                "is_211": is_211,
-                "is_985": is_985,
-                "is_yanjiusheng_yuan": is_yjy,
-                "info_url": f"{settings.yanzhao_base_url}{href}",
+                "is_211": cls["is_211"],
+                "is_985": cls["is_985"],
+                "is_yanjiusheng_yuan": cls["is_yjy"],
+                "info_url": urljoin(BASE, href),
             }
         )
     logger.info(f"query_school_library page={page} → {len(out)} schools")
@@ -148,14 +280,17 @@ async def get_school_info(school_id: str) -> Dict[str, Any]:
     # 所在地 / 主管部门 / 院校特性
     txt = " ".join(sel.css("::text").getall())
     city_m = re.search(r"所在地[：:]\s*([一-龥]{2,4}市?)", txt)
-    dept_m = re.search(r"主管部门[：:]\s*([一-龥]+部?|[一-龥]+委)", txt)
+    # HB-16: 主管部门正则非贪婪 + 包含 "教育厅/省人民政府"
+    dept_m = _DEPT_RE.search(txt)
 
     badges = []
-    if "双一流" in txt:
+    # HB-05: 用名单查表替换关键词匹配
+    cls = _classify_school(name)
+    if cls["is_211"]:
         badges.append("双一流")
-    if "研究生院" in txt:
+    if cls["is_yjy"]:
         badges.append("研究生院")
-    if "自划线" in txt:
+    if cls["is_985"]:
         badges.append("自划线")
 
     # 招生简章列表(从页面抓)
@@ -167,7 +302,7 @@ async def get_school_info(school_id: str) -> Dict[str, Any]:
             admission_notices.append(
                 {
                     "title": title_txt,
-                    "url": f"{settings.yanzhao_base_url}{href}" if href.startswith("/") else href,
+                    "url": urljoin(BASE, href),  # HB-08: urljoin
                 }
             )
 
@@ -180,7 +315,7 @@ async def get_school_info(school_id: str) -> Dict[str, Any]:
             adjust_methods.append(
                 {
                     "title": title_txt,
-                    "url": f"{settings.yanzhao_base_url}{href}" if href.startswith("/") else href,
+                    "url": urljoin(BASE, href),  # HB-08: urljoin
                 }
             )
 
@@ -256,14 +391,16 @@ async def get_recruitment_notices(page: int = 1) -> List[Dict[str, Any]]:
             continue
         href = a.attrib.get("href", "")
         title = "".join(a.css("::text").getall()).strip()
-        if not title or "zsjz/20" not in href:  # 过滤掉非简章链接
+        # HB-08: 放宽过滤到 "zsjz/"(支持老简章 zsjz/2019/...)
+        if not title or "zsjz/" not in href:
             continue
         date_txt = "".join(li.css("span::text").getall()).strip()
         out.append(
             {
                 "title": title,
-                "url": f"{settings.yanzhao_base_url}{href}" if href.startswith("/") else href,
+                "url": urljoin(BASE, href),  # HB-08: urljoin
                 "date": date_txt,
+                "date_parsed": _parse_date(date_txt),  # HB-07: ISO date
             }
         )
     logger.info(f"get_recruitment_notices page={page} → {len(out)} notices")
