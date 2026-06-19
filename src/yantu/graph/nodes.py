@@ -10,11 +10,21 @@ v0.2.0 变更 (HB-03 + HB-09 + MB-05):
 - MB-05: router temperature 降到 0.2
 - v0.2.0-alpha 同期: router + synthesizer 各调 extract_reasoning,把
   reasoning/reasoning_tokens 写入 state(用户画像 UI 的 CollapsibleReasoning 折叠块需要)
+
+v0.2.1 变更 (chat JSON 泄漏统一修复):
+- Intent classifier + Synthesizer 切到 method="function_calling"
+  (json_schema + strict=True 在 glm-5.1 / M2.7 / M3 / o3-mini 4 个 vendor 上 100%
+  抛异常 — LLM 把 JSON 裹在 ```json ... ``` fence 里,Pydantic strict 模式从 `<`
+  开始 parse 失败;M3 还因 reasoning_split 被 OpenAI SDK 拒绝)
+- 删 system prompt "- 输出 JSON,字段: answer / citations / grounded":
+  function_calling 通过 tool_calls 协议自带 schema,LLM 不需要文字提示
+- Fallback 路径加 _strip_fenced_json(): 即便主路径失败,也不会再泄漏 fence
 """
 from __future__ import annotations
 
 import json
 import operator
+import re
 from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -33,6 +43,25 @@ from yantu.graph.tools import (
 from yantu.ui.reasoning import extract_reasoning
 from yantu.utils.llm import get_llm, get_user_profile_prompt
 from yantu.utils.logger import logger
+
+
+# v0.2.1: fallback 路径 strip markdown code fence(```json ... ```)
+# 任何 vendor 在 fallback 路径(无 schema)都可能输出 fence JSON,这里兜底
+_FENCE_JSON_RE = re.compile(r"```(?:json)?\s*\n(\{.*?\})\n```", re.DOTALL)
+
+
+def _strip_fenced_json(text: str) -> str:
+    """如果 text 是 ```json\\n{...}\\n``` 包裹,提取 inner JSON;否则原样返回。
+
+    v0.2.1: 防止 LLM 输出的 markdown fence 字符串泄漏到 Chainlit UI。
+    用 \\{.*?\\} 非贪婪,只在 ```json...``` 包裹下生效,不会误吞其他内容。
+    """
+    if not text:
+        return ""
+    m = _FENCE_JSON_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    return text
 
 
 SYSTEM_PROMPT = """你是研途萤火(yantu)——为考研人服务的个人助理。
@@ -104,10 +133,15 @@ TOOL_BUCKETS: dict[str, list] = {
 
 
 def _classify_intent(query: str) -> Intent:
-    """阶段 1: 不带工具的 LLM,只做意图分类(用 structured output)"""
+    """阶段 1: 不带工具的 LLM,只做意图分类(用 structured output)
+
+    v0.2.1: method="function_calling" 替代 "json_schema" + strict=True
+    (json_schema+strict 在 glm-5.1 / M2.7 / M3 / o3-mini 上 100% 抛异常:
+    LLM 把 JSON 裹在 ```json ... ``` fence 里,Pydantic strict 模式从 `<` 开始 parse 失败)
+    """
     llm = get_llm(temperature=0.2)  # MB-05: 低温度
     try:
-        structured = llm.with_structured_output(Intent, method="json_schema", strict=True)
+        structured = llm.with_structured_output(Intent, method="function_calling")
         return structured.invoke([
             SystemMessage(content=INTENT_PROMPT.format(query=query)),
         ])
@@ -214,15 +248,18 @@ def make_synthesizer_node():
             "- 必须基于工具结果回答,严禁编造未出现的数据\n"
             "- 引用来源时给出文件名或学校名\n"
             "- 数字/分数线要明确标注\n"
-            "- 工具未返回时诚实说'未找到'\n"
-            "- 输出 JSON,字段: answer / citations / grounded"
+            "- 工具未返回时诚实说'未找到'"
+            # v0.2.1: 删 "输出 JSON,字段: answer / citations / grounded" — function_calling
+            # 通过 tool_calls 协议自带 schema,LLM 不需要文字提示;保留反而让 fallback 路径
+            # 的 LLM 看到矛盾指令,吐 fence JSON。
         ))]
         msgs.extend(_crop_history(state.get("messages", [])))
         msgs.append(HumanMessage(content=(
             f"请综合以上工具结果,回答用户原始问题:\n{state.get('user_query', '')}"
         )))
         try:
-            structured = llm.with_structured_output(FinalAnswer, method="json_schema", strict=True)
+            # v0.2.1: function_calling 替代 json_schema + strict=True
+            structured = llm.with_structured_output(FinalAnswer, method="function_calling")
             result = structured.invoke(msgs)
             response = result.answer
             citations = [c.model_dump() for c in result.citations]
@@ -241,7 +278,10 @@ def make_synthesizer_node():
         except Exception as e:
             logger.warning(f"Synthesizer structured output failed: {e}, fallback to plain text")
             ai = llm.invoke(msgs + [HumanMessage(content="请直接用 1-3 段话回答。")])
-            response = ai.content if isinstance(ai.content, str) else str(ai.content)
+            content = ai.content if isinstance(ai.content, str) else str(ai.content)
+            # v0.2.1: 双保险 — 即便 fallback 触发,strip ```json ... ``` fence
+            # 不泄漏 markdown JSON 文本到 Chainlit UI
+            response = _strip_fenced_json(content)
             _r = extract_reasoning(ai)
             return {
                 "messages": [ai],

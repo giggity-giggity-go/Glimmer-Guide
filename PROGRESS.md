@@ -2,7 +2,7 @@
 
 > **截止日期**: 2026-06-19
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%)
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试)
 
 ---
 
@@ -68,9 +68,58 @@
 - [ ] Tool 5 (`search_local`) 单独 bench,涉及 bge 加载
 - [ ] scraper `search.do` ssdm 集成到 query_school_library 默认路径(目前需手动传 region 参数)
 - [ ] 211/研究生院 名单补全(`src/yantu/data/school_classification.json` 现在只有 57 所 985)
-- [ ] LLM structured output 兼容性矩阵(部分模型不支持 `method="json_schema", strict=True`)
+- [ ] ~~LLM structured output 兼容性矩阵(部分模型不支持 `method="json_schema", strict=True`)~~ → v0.2.1 已修,统一改 `method="function_calling"`
 - [ ] LangSmith tracing 接入(便于调试 router/synthesizer 行为)
 - [ ] 异步 SqliteSaver 替代 MemorySaver(当前重启 Chainlit 丢会话历史)
+
+---
+
+## 🔧 v0.2.1 JSON 泄漏统一修复(2026-06-19,1 commit)
+
+### 问题
+Chainlit UI chat 偶尔显示 `json\n{"answer": ..., "citations": ..., "grounded": ...}` 文本给用户,而不是干净的 AI 回答。**实测 100% 复现**:glm-5.1 在合成器 fallback 路径必吐 ` ```json\n{...}\n``` ` markdown fence 包裹的 JSON,Chainlit 原样渲染。
+
+### 根因(2 步触发,3 个 vendor 都中招)
+1. **主路径必失败**:`with_structured_output(FinalAnswer, method="json_schema", strict=True)` 在 glm-5.1 / MiniMax-M2.7 / MiniMax-M3 / o3-mini 4 个 vendor 上 100% 抛异常
+   - glm / M2.7 / o3-mini:LLM 把 JSON 裹在 ` ```json ... ``` ` markdown fence 里,Pydantic strict 模式从 `<` 字符开始 parse 失败
+   - M3:`reasoning_split=True` 被 OpenAI SDK 拒绝(TypeError)
+2. **Fallback 路径泄漏**:`nodes.py:241-253` except 分支 `llm.invoke(msgs + [...])`,system prompt 仍含"- 输出 JSON,字段: ..." → LLM 看到矛盾指令 → 仍按 schema 输出 → fence JSON 字符串塞 `state["response"]`
+3. **UI 层兜底失效**:`app.py:204` `_strip_think` 只 strip `<think>` 块,不管 ` ``` ` fence
+
+### 为什么"有时正常有时泄漏"
+glm-5.1 fallback **永远**输出 fence JSON,但当 query 让 LLM 在 fence 前生成 ≥200 字符中文 preamble 时,fence 被推到用户看不到的位置 → 看起来"正常"。Intent classifier 也因 fence 失败 → fallback 到 `target="both"` → ALL_TOOLS 5 个工具,造成部分 query 路由到 local tool 看到中文前置。
+
+### 修复(4 处改动,1 个文件)
+
+| # | 文件:行 | 改动 |
+|---|---|---|
+| 1 | `src/yantu/graph/nodes.py:144` | Intent classifier: `method="json_schema"` → `method="function_calling"` |
+| 2 | `src/yantu/graph/nodes.py:251` | 删 system prompt `- 输出 JSON,字段: answer / citations / grounded`(避免矛盾指令) |
+| 3 | `src/yantu/graph/nodes.py:262` | Synthesizer: `method="json_schema"` → `method="function_calling"` |
+| 4 | `src/yantu/graph/nodes.py:284` | Fallback 路径加 `_strip_fenced_json(content)`(双保险,fence 不再泄漏) |
+
+`_FENCE_JSON_RE = re.compile(r"```(?:json)?\s*\n(\{.*?\})\n```", re.DOTALL)` — 非贪婪,只在 fence 包裹下生效。
+
+### 测试覆盖(7 个新 pytest)
+- `tests/graph/test_synthesizer_json_leak.py`:5 个 `_strip_fenced_json` 单测 + 2 个 synthesizer 集成测(主路径 + fallback)
+- **总测试数**:41 → 50(+7 个新增,全部通过)
+
+### UI 实测(4 prompt,glm-5.1)
+| Prompt | 实测 answer_chars | 工具 | JSON 泄漏 |
+|---|---|---|---|
+| `你好` | 309 | 无 | ❌ 无 |
+| `北京大学 信息公开` | 444 | query_school_library + get_school_info | ❌ 无 |
+| `CCNU 复试分数线` | 374 | search_local | ❌ 无 |
+| `云南农大 招生人数` | 361 | search_local (max rounds) | ❌ 无 |
+
+**4/4 全部干净返回 markdown 渲染的中文回答**,无 JSON 文本。
+
+### 已知遗留(zhipu 1214 错误)
+- Intent classifier `function_calling` 在 glm-5.1(zhipu)上报 `BadRequestError code 1214 messages 参数非法`,仍然 fallback 到 `target="both"`(v0.2.0 hotfix 3ba29fd 生效)
+- Synthesizer `function_calling` 在 glm-5.1 上 100% 成功(实测 4/4)
+- Router `bind_tools` 成功,L2 router LLM 自己判断 tool_calls(本次实测全部走通)
+- **副作用**:greeting 类 chat intent 现在变成 "both"(5 个 tool 都给 LLM),但 LLM 自己决定不调 → 实际无 tool 调用 → 直接 synthesize → 干净回答
+- **真要修**:zhipu 端需要用其原生 `with_structured_output` 接口(非 OpenAI 兼容协议),或换 vendor。降级为后续 TODO。
 
 ---
 
