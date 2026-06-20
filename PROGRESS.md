@@ -1,9 +1,77 @@
 # 研途萤火(yantu)项目进度
 
-> **截止日期**: 2026-06-19
+> **截止日期**: 2026-06-20
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
 > **当前 vendor**: `minimax / MiniMax-M3`(2026-06-19 切换,v0.2.2 extra_body 修复后 M3 可用)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试) + ✅ v0.2.2 M3 extra_body 修复 (1 commit, 53/53 测试) + 🚧 v0.3.0-alpha 多会话骨架 (1 commit, 71/71 测试,SqliteSaver + SessionManager + /api/sessions,等待 PR-2 长期记忆 + 侧边栏 JSX)
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试) + ✅ v0.2.2 M3 extra_body 修复 (1 commit, 53/53 测试) + 🚧 v0.3.0-alpha 多会话骨架 (1 commit, 71/71 测试) + 🚀 **v0.3.0-beta PR-2 4 子项 (6 commit, 118/118 pytest)**
+
+---
+
+## 🚀 v0.3.0-beta PR-2 落地报告(2026-06-20,6 commit,118 pytest)
+
+**核心成果**:v0.3.0-alpha 4 张表(Sessions / MemoryFact / UserSetting / LangGraph checkpoint)从"空骨架"升级到"消费方全通",LLM 升级为"个人助理"(跨会话记忆 + 自动压缩 + 多会话侧边栏 + 软硬删级联)。
+
+### 6 个 Commit 时间线
+
+| Commit | 类型 | 内容 |
+|---|---|---|
+| `ecfff2e` | 🔧 fix | app.py 第 24 行损坏的 /mcp 前缀(从历史会话残留) |
+| `b92827c` | ✨ feat(pr2) | **子项 4** hard_delete_session 释放 memory_facts(3 类处理)+ 10 pytest |
+| `21acc3d` | ✨ feat(pr2) | **子项 1** 上下文自动压缩 + UserSetting CRUD + 15 pytest |
+| `5e7481e` | ✨ feat(pr2) | **子项 3** 长期记忆(LangMem path A' + 35 pytest) |
+| `c3701ea` | ✨ feat(pr2) | 3 JSX 面板(ContextSettings + MemoryPanel + SessionSidebar)+ TODO-1 字段名 fix |
+| `410c942` | 🧪 test(pr2) | 4 个端到端 integration 测试覆盖 4 个 E2E prompt 场景 |
+
+### 4 子项实现状态
+
+| 子项 | 状态 | 关键文件 | 测试数 |
+|---|---|---|---|
+| **1. 上下文自动压缩** | ✅ | `src/yantu/graph/compressor.py` + `data/user_settings.py` | 15 |
+| **2. SessionSidebar.jsx** | ✅ | `public/elements/SessionSidebar.jsx` + 5 silent action_callbacks | (JSX 手动验证) |
+| **3. 长期记忆** | ✅ | `src/yantu/memory/{schemas,retriever,extractor,langmem_bridge}.py` | 35 |
+| **4. hard_delete 释放 memory_facts** | ✅ | `src/yantu/session/cleanup.py` | 10 |
+
+### 关键架构决策(中途变更)
+
+1. **LangMem 路径从 A → A'**:Day 1 验证发现 langmem 0.0.30 实际用 LangGraph `BaseStore`(不是 LangMem 自有),写 12 个方法的 Chroma adapter 工作量大。**改用 A':LangMem InMemoryStore + 独立 Chroma RAG + SQLite memory_facts 是 source of truth,InMemoryStore 进程启动时从 SQLite rehydrate**。
+2. **trim_messages 改自实现**:langchain 1.3.10 的 `trim_messages(strategy="last", max_tokens=N)` 实测未生效(max_tokens=30 但 12 token/msg × 10 msg 全保留)。**改自实现 _trim_to_window**(20 行)。
+3. **compressor 改 async 路由**:`pre_model_hook` 是 create_react_agent 专属,本项目用 StateGraph 手搭,**改 router 为 async def + await compress_context_if_needed**。
+
+### 测试结果(118 passed)
+
+- 原 71 测试(无回归)
+- 新增 47 测试:
+  - `tests/data/test_user_settings.py`:7
+  - `tests/graph/test_compressor.py`:8
+  - `tests/session/test_cleanup.py`:10
+  - `tests/memory/test_schemas.py`:10
+  - `tests/memory/test_retriever.py`:5
+  - `tests/memory/test_extractor.py`:20
+  - `tests/integration/test_v030beta_e2e.py`:4 (4 个 E2E prompt 场景)
+- 修复:`tests/session/test_manager.py` 的 hard_delete 测试(适配 async router)
+
+### 4 个 E2E Prompt 场景(Python 层验证)
+
+| # | 场景 | 测试方法 |
+|---|---|---|
+| 1 | 35 轮对话 → 触发压缩 | `test_35_rounds_trigger_compression`(小 window 模拟) |
+| 2 | 跨会话召回事实 | `test_recall_fact_from_different_session`(mock Chroma) |
+| 3 | 删会话 → cleanup 3 类处理 | `test_delete_session_processes_3_fact_classes` |
+| 4 | preference 跨会话保留 | `test_preference_preserved_across_session_delete` |
+
+### 端到端浏览器验证(待 PR-3)
+
+JSX 组件需浏览器实测:
+- `display="side"` 在 Chainlit 2.11.1 的实际行为
+- 5 秒轮询在多 tab 同时打开时的并发
+- 滑块 onChange 实时回写 user_settings
+
+### 后续(v0.3.0-rc / final)
+
+- 实测 4 个 E2E prompt 在真实浏览器
+- chainlit run app.py 启动 + 浏览器测试
+- 如果 display="side" 不工作 → fallback inline + position:fixed
+- 修 LangMem vendor 兼容问题(待定)
 
 ---
 
