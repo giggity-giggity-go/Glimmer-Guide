@@ -8,7 +8,11 @@ name = "研途萤火"
 default_theme = "light"
 description = "个人考研智能体 · 研招网信息查询 + 资料语义检索"
 
-# 聊天历史
+# v0.3.0 Day 8: 隐藏 Chainlit 默认 chat profile 侧边栏(避免跟自建 SessionSidebar 重复)
+# 数据持久化仍在后台跑,仅 UI 不显示
+default_sidebar_state = "hidden"
+
+# 聊天历史(隐藏后此字段不生效,保留以备回退)
 chat_profiles_section_name = "会话"
 
 # 注入 JS,把 Settings 按钮挪到"说明"按钮左边
