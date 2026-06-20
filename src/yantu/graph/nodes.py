@@ -31,6 +31,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
 
+from yantu.graph.compressor import compress_context_if_needed
 from yantu.graph.state import AgentState
 from yantu.graph.tools import (
     ALL_TOOLS,
@@ -159,9 +160,15 @@ def _classify_intent(query: str) -> Intent:
 
 
 def make_router_node():
-    """router 节点:两阶段(Intent 分类 → bind 1-N tool)"""
+    """router 节点:两阶段(Intent 分类 → bind 1-N tool)
 
-    def router(state: AgentState) -> AgentState:
+    v0.3.0-beta 改造:
+    - async def router(可 await compressor / retriever)
+    - 阶段 0:compress_context_if_needed 压缩历史
+    - 阶段 0.5:retrieve_relevant_facts 注入长期记忆
+    """
+
+    async def router(state: AgentState) -> AgentState:
         query = state.get("user_query", "")
         intent = _classify_intent(query)
         logger.info(
@@ -176,12 +183,30 @@ def make_router_node():
                 "messages": [],
                 "intent": intent.target,
             }
+
+        # v0.3.0-beta 阶段 0:上下文压缩
+        messages = state.get("messages", [])
+        comp_result = await compress_context_if_needed(messages)
+        if comp_result.get("is_compressed") and comp_result.get("messages"):
+            messages = comp_result["messages"]
+            logger.info(
+                f"Router: compressed to {len(messages)} msgs "
+                f"({comp_result.get('compressed_summary', '')[:60]}...)"
+            )
+
+        # v0.3.0-beta 阶段 0.5:长期记忆检索(注入 system prompt)
+        long_term_block = ""
+        facts = state.get("long_term_facts", [])
+        if facts:
+            long_term_block = "\n\n[长期记忆]\n" + _format_facts(facts)
+
         # 阶段 2: bind 该 intent 对应的工具,让 LLM 选择具体调用
         llm = get_llm(temperature=0.2)
         llm_with_tools = llm.bind_tools(tools)
-        msgs = [SystemMessage(content=_system_with_profile())]
-        if state.get("messages"):
-            msgs.extend(state["messages"])
+        system_content = _system_with_profile() + long_term_block
+        msgs = [SystemMessage(content=system_content)]
+        if messages:
+            msgs.extend(messages)
         msgs.append(HumanMessage(content=query))
         ai = llm_with_tools.invoke(msgs)
         # v0.2.0-alpha: 同时返回 reasoning 字段(供 CollapsibleReasoning UI)
@@ -193,13 +218,34 @@ def make_router_node():
             f"reasoning_chars={len(_r.text)}"
         )
         return {
-            "messages": [ai],
+            "messages": [ai] if not comp_result.get("is_compressed") else [ai],
             "intent": intent.target,
             "reasoning": _r.text + ("\n" if _r.text else ""),
             "reasoning_tokens": _r.tokens,
+            "is_compressed": comp_result.get("is_compressed", False),
+            "compressed_summary": comp_result.get("compressed_summary", ""),
         }
 
     return router
+
+
+def _format_facts(facts: list[dict]) -> str:
+    """格式化 facts 为可读文本(注入 system prompt)
+
+    Args:
+        facts: list of {fact_type, subject, text, confidence} dicts
+    """
+    lines = []
+    for f in facts:
+        ftype = f.get("fact_type", "")
+        text = f.get("text", "") or f.get("fact_value", {}).get("text", "")
+        subj = f.get("subject", "")
+        conf = f.get("confidence", 1.0)
+        prefix = f"[{ftype}]"
+        if subj:
+            prefix += f"({subj})"
+        lines.append(f"- {prefix} {text} (conf={conf:.2f})")
+    return "\n".join(lines)
 
 
 # ==================== HB-09: Synthesizer structured output ====================
