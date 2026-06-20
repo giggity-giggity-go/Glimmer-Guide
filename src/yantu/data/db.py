@@ -34,9 +34,15 @@ def init_db() -> None:
     v0.3.0: 加 PRAGMA WAL + checkpointer.setup()
     - WAL 模式允许并发读写不互锁,extractor 后台 task 写 long_term_memory 时不阻塞 LangGraph checkpoint
     - busy_timeout=5000ms 应对短时锁竞争
+
+    v0.3.0-beta: 加轻量迁移
+    - memory_facts.deleted_at 列(SQLite ALTER TABLE)
+    - Base.metadata.create_all 不加列到已存在的表
     """
     Path(settings.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(_engine)
+    # v0.3.0-beta: 轻量迁移(memory_facts.deleted_at)
+    _migrate_add_deleted_at()
     # v0.3.0: WAL + busy_timeout(单 connection 触发,持久化在 -wal 文件)
     with _engine.connect() as conn:
         conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -51,6 +57,26 @@ def init_db() -> None:
         # 不阻塞 ORM 初始化,允许 checkpointer 失败时数据层仍可用
         from yantu.utils.logger import logger
         logger.warning(f"checkpointer.setup() 跳过(可能未安装 langgraph-checkpoint-sqlite): {e}")
+
+
+def _migrate_add_deleted_at() -> None:
+    """v0.3.0-beta 轻量迁移:memory_facts 表加 deleted_at 列
+
+    Base.metadata.create_all 不向已存在表加列。
+    检查 information_schema,缺则 ALTER TABLE。
+    """
+    with _engine.connect() as conn:
+        # SQLite 查列是否存在
+        result = conn.execute(text(
+            "SELECT name FROM pragma_table_info('memory_facts') WHERE name='deleted_at'"
+        ))
+        if result.fetchone() is None:
+            conn.execute(text(
+                "ALTER TABLE memory_facts ADD COLUMN deleted_at DATETIME"
+            ))
+            conn.commit()
+            from yantu.utils.logger import logger
+            logger.info("Migration: added memory_facts.deleted_at column")
 
 
 def get_engine():

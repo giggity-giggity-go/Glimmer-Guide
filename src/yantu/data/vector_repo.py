@@ -157,5 +157,47 @@ def get_long_term_memory_collection():
     return _get_collection(_get_singleton_client(), LONG_TERM_MEMORY_COLLECTION)
 
 
+# ==================== v0.3.0-beta 长期记忆 fact CRUD ====================
+
+
+def soft_delete_fact(fact_id: int) -> None:
+    """软删一条 fact(metadata.is_deleted=True,不删文档)
+
+    v0.3.0-beta:cleanup service 用,保留 30 天可恢复窗口。
+    """
+    coll = get_long_term_memory_collection()
+    coll.update(
+        ids=[f"fact-{fact_id}"],
+        metadatas=[{"is_deleted": True}],
+    )
+    logger.info(f"Soft-deleted fact {fact_id} (30-day retention)")
+
+
+def hard_delete_fact(fact_id: int) -> None:
+    """硬删一条 fact(Chroma 文档真删,不可逆)"""
+    coll = get_long_term_memory_collection()
+    coll.delete(ids=[f"fact-{fact_id}"])
+    logger.info(f"Hard-deleted fact {fact_id}")
+
+
+def delete_facts_where(where: Dict[str, Any]) -> int:
+    """按 metadata where 条件批量删(不可逆)
+
+    Args:
+        where: Chroma where filter dict,例 {"source_thread": "abc123"}
+               或 {"fact_type": {"$in": ["conversation_outcome"]}}
+
+    Returns:
+        删除的文档数(estimate,Chroma 不返回精确值)
+    """
+    coll = get_long_term_memory_collection()
+    before = coll.count()
+    coll.delete(where=where)
+    after = coll.count()
+    deleted = before - after
+    logger.info(f"Bulk-deleted {deleted} facts (where={where})")
+    return deleted
+
+
 # SAFETY (CB-02): reset() and delete_collection() are intentionally NOT exposed.
 # To wipe data, manually delete the chroma_dir directory on disk.

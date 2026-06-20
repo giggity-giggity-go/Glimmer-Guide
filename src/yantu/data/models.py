@@ -288,6 +288,7 @@ class MemoryFact(Base):
     )
     access_count: Mapped[int] = mapped_column(Integer, default=0)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     user_corrected_value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
