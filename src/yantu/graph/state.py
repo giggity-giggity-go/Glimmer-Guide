@@ -49,3 +49,10 @@ class AgentState(TypedDict, total=False):
     # 推理过程(router + synthesizer 拼接,operator.add reducer 自动累加)
     reasoning: Annotated[str, operator.add]
     reasoning_tokens: int
+
+    # v0.3.0-beta:上下文压缩状态
+    is_compressed: bool
+    compressed_summary: str
+
+    # v0.3.0-beta:长期记忆检索结果(retriever 写入,router 注入)
+    long_term_facts: list[dict]
