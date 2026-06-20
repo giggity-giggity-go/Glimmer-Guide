@@ -130,11 +130,6 @@ async def start() -> None:
         ),
         elements=[
             cl.CustomElement(
-                name="ContextSettings",
-                props={"initial": user_settings},
-                display="inline",
-            ),
-            cl.CustomElement(
                 name="MemoryPanel",
                 props={"initial": facts_for_panel},
                 display="inline",
@@ -505,20 +500,46 @@ def extractor_should_trigger(message_count_delta: int = 2) -> bool:
 
 @chainlit_app.get("/settings")
 async def settings_page() -> HTMLResponse:
-    """渲染设置表单(预填当前 profile)"""
+    """渲染设置表单(预填当前 profile + UserSetting)"""
     profile = get_profile().model_dump()
+    from yantu.data.user_settings import get_all_settings
+    user_setting = get_all_settings()
     html = SETTINGS_HTML.read_text(encoding="utf-8")
     # 占位符放在 <script type="application/json"> 里,前端 parse 出来预填
     html = html.replace("__PROFILE_JSON__", json.dumps(profile, ensure_ascii=False))
+    html = html.replace("__USER_SETTING_JSON__", json.dumps(user_setting, ensure_ascii=False))
     return HTMLResponse(html)
 
 
 @chainlit_app.post("/settings/save")
 async def settings_save(request: Request) -> RedirectResponse:
-    """保存表单提交,303 跳回 / 让前端下次 export_markdown() 自然读到新值"""
+    """保存表单提交(v0.3.0-beta: 拆 profile + user_setting 两类)
+
+    303 跳回 / 让前端下次 export_markdown() 自然读到新值。
+    上下文与记忆 5 字段(4 滑块 + 1 复选框)走 UserSetting 表。
+    """
     payload = await request.json()
-    update_profile(payload)
-    logger.info(f"Profile updated via /settings/save, payload keys={list(payload.keys())}")
+    # 拆分:Profile 字段 + UserSetting 字段
+    from yantu.data.user_settings import update_settings
+    USER_SETTING_KEYS = {
+        "context_window_tokens", "context_keep_recent_messages",
+        "memory_injection_count", "memory_extract_every_n_turns",
+        "memory_enabled",
+    }
+    user_setting_payload = {k: v for k, v in payload.items() if k in USER_SETTING_KEYS}
+    profile_payload = {k: v for k, v in payload.items() if k not in USER_SETTING_KEYS}
+    if profile_payload:
+        update_profile(profile_payload)
+    if user_setting_payload:
+        # 字段类型转换
+        typed = {}
+        for k, v in user_setting_payload.items():
+            if k == "memory_enabled":
+                typed[k] = bool(v)
+            else:
+                typed[k] = int(v)
+        update_settings(**typed)
+    logger.info(f"/settings/save: profile={list(profile_payload.keys())}, user_setting={list(user_setting_payload.keys())}")
     return RedirectResponse(url="/", status_code=303)
 
 

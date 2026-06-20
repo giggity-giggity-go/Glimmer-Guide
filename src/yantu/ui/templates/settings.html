@@ -132,6 +132,27 @@
       height: 16px;
       cursor: pointer;
     }
+    /* Range slider — 上下文与记忆分区用 */
+    input[type="range"] {
+      width: 100%;
+      margin: 6px 0 0;
+      accent-color: var(--accent);
+    }
+    .range-row { display: flex; align-items: center; gap: 12px; }
+    .range-row input[type="range"] { flex: 1; margin: 0; }
+    .range-row .range-value {
+      flex: 0 0 80px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .range-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
     .tag-input-wrap {
       display: flex;
       flex-wrap: wrap;
@@ -440,6 +461,66 @@
         </div>
       </fieldset>
 
+      <!-- v0.3.0-beta 新增:上下文与记忆 -->
+      <fieldset>
+        <legend>🧠 上下文与记忆</legend>
+
+        <div class="row">
+          <label for="context_window_tokens">上下文窗口上限 (tokens)</label>
+          <div class="ctrl">
+            <div class="range-row">
+              <input type="range" id="context_window_tokens" name="context_window_tokens"
+                     min="5000" max="100000" step="1000" />
+              <span class="range-value" data-display="context_window_tokens">30000</span>
+            </div>
+            <div class="range-hint">5k-100k。LLM 输入超此值时自动压缩老消息。</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="context_keep_recent_messages">保留最近消息条数</label>
+          <div class="ctrl">
+            <div class="range-row">
+              <input type="range" id="context_keep_recent_messages" name="context_keep_recent_messages"
+                     min="2" max="30" step="1" />
+              <span class="range-value" data-display="context_keep_recent_messages">10</span>
+            </div>
+            <div class="range-hint">2-30。压缩时保留这么多条原文不摘要。</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="memory_injection_count">注入长期记忆条数</label>
+          <div class="ctrl">
+            <div class="range-row">
+              <input type="range" id="memory_injection_count" name="memory_injection_count"
+                     min="0" max="30" step="1" />
+              <span class="range-value" data-display="memory_injection_count">10</span>
+            </div>
+            <div class="range-hint">0-30。每轮 query 检索 top-K 注入 system prompt。</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="memory_extract_every_n_turns">每 N 轮抽取 1 次</label>
+          <div class="ctrl">
+            <div class="range-row">
+              <input type="range" id="memory_extract_every_n_turns" name="memory_extract_every_n_turns"
+                     min="1" max="10" step="1" />
+              <span class="range-value" data-display="memory_extract_every_n_turns">3</span>
+            </div>
+            <div class="range-hint">1-10。N 越大越省 LLM 费用,但抽取滞后。</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>
+            <input type="checkbox" id="memory_enabled" name="memory_enabled" />
+            启用长期记忆(后台抽取 facts + 跨会话召回)
+          </label>
+        </div>
+      </fieldset>
+
       <div class="actions">
         <button type="button" class="secondary" id="reset-default">重置默认值</button>
         <button type="submit" class="primary" id="save-btn">💾 保存</button>
@@ -451,6 +532,8 @@
 
   <!-- 当前 profile 数据,后端替换下方占位符 -->
   <script id="profile-data" type="application/json">__PROFILE_JSON__</script>
+  <!-- v0.3.0-beta:UserSetting 数据(上下文与记忆 4 字段) -->
+  <script id="user-setting-data" type="application/json">__USER_SETTING_JSON__</script>
 
   <script>
     // ============== 工具 ==============
@@ -466,6 +549,27 @@
 
     // ============== 预填 ==============
     const PROFILE = JSON.parse($('#profile-data').textContent);
+    const USER_SETTING = JSON.parse($('#user-setting-data').textContent);
+
+    // v0.3.0-beta:上下文与记忆分区预填
+    ['context_window_tokens', 'context_keep_recent_messages', 'memory_injection_count', 'memory_extract_every_n_turns'].forEach((k) => {
+      const el = document.getElementById(k);
+      const v = USER_SETTING[k];
+      if (el && v != null) el.value = String(v);
+      const disp = document.querySelector(`[data-display="${k}"]`);
+      if (disp) disp.textContent = String(v);
+    });
+    const memEnabled = document.getElementById('memory_enabled');
+    if (memEnabled) memEnabled.checked = USER_SETTING.memory_enabled !== false;
+
+    // 滑块拖动实时显示数值
+    ['context_window_tokens', 'context_keep_recent_messages', 'memory_injection_count', 'memory_extract_every_n_turns'].forEach((k) => {
+      const el = document.getElementById(k);
+      const disp = document.querySelector(`[data-display="${k}"]`);
+      if (el && disp) {
+        el.addEventListener('input', () => { disp.textContent = el.value; });
+      }
+    });
 
     function fillScalars(profile) {
       // 普通 input: name="a.b" → profile[a][b]
