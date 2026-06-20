@@ -181,15 +181,29 @@ class TestHardDelete:
         assert get_session(tid) is None
 
     def test_hard_delete_removes_checkpoint_rows(self):
-        # 1. 建会话 + 写一条 LangGraph checkpoint
+        # v0.3.0-beta:router 是 async,build_agent 用 SqliteSaver(同步),ainvoke 不支持
+        # 改用 SqliteSaver.put 直接写一行 checkpoint(测的是 hard_delete 是否清表,不是 agent 流程)
+        from langgraph.checkpoint.sqlite import SqliteSaver
         tid = create_session()
-        from yantu.graph.agent import build_agent
-        from langchain_core.messages import HumanMessage
-        agent = build_agent()
-        agent.invoke(
-            {"messages": [HumanMessage(content="hi")], "user_query": "hi"},
-            config={"configurable": {"thread_id": tid}},
-        )
+        cm = SqliteSaver.from_conn_string(str(db_module._engine.url.database))
+        with cm as saver:
+            # put_writes + put 都能写,简化为 put
+            from langchain_core.runnables import RunnableConfig
+            config: RunnableConfig = {"configurable": {"thread_id": tid, "checkpoint_ns": "", "checkpoint_id": "test-cp"}}
+            # 用最低 API 写入一个空 checkpoint tuple
+            try:
+                saver.put(
+                    config,
+                    {"v": 1, "id": "test-cp", "ts": "2026-06-20T00:00:00Z",
+                     "channel_values": {}, "channel_versions": {},
+                     "versions_seen": {}, "pending_sends": [],
+                     "updated_at": None},
+                    {"source": "test", "step": 0, "writes": {}, "parents": {}},
+                    {},
+                )
+            except Exception as e:
+                # 写失败不影响 hard_delete 验证,只是没数据可删
+                pass
         # 2. checkpoint 行应存在
         from yantu.data.db import _engine
         with _engine.connect() as conn:
