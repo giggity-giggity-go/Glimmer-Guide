@@ -4,6 +4,8 @@
 // 显示所有 fact(分 fact_type 分组),支持删除 + 软删标记
 // 数据:props.facts 一次性传入(由 on_chat_start 调 list_memories action 取)
 
+// props 是 react-runner scope 里的全局变量,不是函数参数(跟 CollapsibleReasoning 一致)
+
 import { useState } from "react";
 
 const FACT_TYPE_LABELS = {
@@ -15,7 +17,9 @@ const FACT_TYPE_LABELS = {
   timeline_event: { label: "时间事件", color: "#6e7781" },
 };
 
-export default function MemoryPanel({ initial = [] }) {
+export default function MemoryPanel() {
+  // react-runner 注入 props 为全局变量
+  const initial = (props && props.initial) || [];
   const [facts, setFacts] = useState(initial);
   const [status, setStatus] = useState("");
 

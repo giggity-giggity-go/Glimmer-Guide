@@ -160,3 +160,22 @@ class TestRetrieveRelevantFacts:
         # 验证 k=7 传给 search(全部用 kwargs)
         kwargs = mock_search.call_args.kwargs
         assert kwargs["k"] == 7
+
+    @pytest.mark.asyncio
+    async def test_where_uses_and_operator(self, monkeypatch):
+        """v0.3.0-beta hotfix: 多条件必须用 $and 包装(Chroma API 限制)"""
+        import yantu.memory.retriever as ret
+        monkeypatch.setattr(
+            ret, "get_setting",
+            lambda k, d=None: {"memory_enabled": True, "memory_injection_count": 5}.get(k, d),
+        )
+        with patch.object(vector_repo, "search") as mock_search:
+            mock_search.return_value = []
+            await retrieve_relevant_facts("test")
+        kwargs = mock_search.call_args.kwargs
+        where = kwargs["where"]
+        # 必须用 $and 包装,不能直接传多个 key(否则 Chroma 抛 ValueError)
+        assert "$and" in where
+        assert len(where["$and"]) == 2
+        assert {"user_id": "default"} in where["$and"]
+        assert {"is_deleted": False} in where["$and"]

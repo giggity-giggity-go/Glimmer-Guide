@@ -42,11 +42,17 @@ async def retrieve_relevant_facts(
     if not get_setting("memory_enabled", True):
         return []
 
-    # Chroma 检索(过滤 is_deleted=False)
+    # Chroma 检索 — 多条件必须用 $and 包装(API 限制 1 个 operator)
+    where_filter = {
+        "$and": [
+            {"user_id": user_id},
+            {"is_deleted": False},
+        ]
+    }
     results = vector_repo.search(
         query=query,
         k=k,
-        where={"user_id": user_id, "is_deleted": False},
+        where=where_filter,
         collection_name=vector_repo.LONG_TERM_MEMORY_COLLECTION,
     )
 

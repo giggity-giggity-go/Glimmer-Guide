@@ -43,9 +43,12 @@ def delete_session_with_memory(thread_id: str) -> dict:
         {"ok": True, "soft_deleted": int, "hard_deleted": int, "kept": int}
     """
     # 1) Chroma 先清(HARD_DELETE 类的 vector 文档不可逆,放最前)
+    # 多条件必须用 $and 包装(Chroma API 限制 1 个 operator)
     chroma_deleted = vector_repo.delete_facts_where({
-        "source_thread": thread_id,
-        "fact_type": {"$in": list(HARD_DELETE_FACTS)},
+        "$and": [
+            {"source_thread": thread_id},
+            {"fact_type": {"$in": list(HARD_DELETE_FACTS)}},
+        ]
     })
 
     # 2) SQLite 软删(SOFT_DELETE 类)

@@ -8,9 +8,14 @@
 // 二次 confirm 删除
 // 100% inline style(跟现有 3 个 JSX 一致)
 
+// props 是 react-runner scope 里的全局变量,不是函数参数
+
 import { useState, useEffect } from "react";
 
-export default function SessionSidebar({ initial = [], activeId = "" }) {
+export default function SessionSidebar() {
+  // react-runner 注入 props 为全局
+  const initial = (props && props.initial) || [];
+  const activeId = (props && props.activeId) || "";
   const [sessions, setSessions] = useState(initial);
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");

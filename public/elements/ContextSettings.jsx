@@ -4,9 +4,13 @@
 // 4 个控件:context_window 滑块 / keep_recent 滑块 / memory_injection 滑块 / memory_enabled 复选框
 // 保存调 callAction("save_context_settings") 批量更新 UserSetting 表
 
+// props 是 react-runner scope 里的全局变量,不是函数参数
+
 import { useState, useEffect } from "react";
 
-export default function ContextSettings({ initial = {} }) {
+export default function ContextSettings() {
+  // react-runner 注入 props 为全局
+  const initial = (props && props.initial) || {};
   const init = {
     context_window_tokens: 30000,
     context_keep_recent_messages: 10,

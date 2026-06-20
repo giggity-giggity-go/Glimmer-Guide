@@ -98,11 +98,16 @@ class TestDeleteSessionWithMemory:
         assert result["hard_deleted"] == 1
         assert result["soft_deleted"] == 0
         assert result["kept"] == 0
-        # Chroma 调了一次 where 级联
+        # Chroma 调了一次 where 级联(用 $and 包装)
         mock_vr.delete_facts_where.assert_called_once()
         call_args = mock_vr.delete_facts_where.call_args[0][0]
-        assert call_args["source_thread"] == tid
-        assert "conversation_outcome" in str(call_args["fact_type"])
+        # v0.3.0-beta hotfix: 多条件用 $and 包装
+        assert "$and" in call_args
+        conds = call_args["$and"]
+        # 找到 source_thread 和 fact_type 两个条件
+        cond_dict = {list(c.keys())[0]: list(c.values())[0] for c in conds}
+        assert cond_dict.get("source_thread") == tid
+        assert "conversation_outcome" in cond_dict.get("fact_type", {}).get("$in", [])
 
     def test_soft_delete_facts(self):
         """open_question / timeline_event 应被软删(is_deleted=True,deleted_at 不空)"""

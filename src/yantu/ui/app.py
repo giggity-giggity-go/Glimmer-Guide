@@ -147,6 +147,7 @@ async def start() -> None:
         ],
         author="萤火",
     ).send()
+    logger.info(f"on_chat_start: {len(facts_for_panel)} facts for panel, {len(user_settings)} user settings")
 
 
 # ==================== 命令面板:修改用户画像 ====================
