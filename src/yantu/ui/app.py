@@ -7,6 +7,7 @@ v0.3.0 变更:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sys
@@ -67,11 +68,22 @@ async def start() -> None:
     """每个新会话触发:warmup + 显示用户画像 + 初始化 agent
 
     v0.3.0: thread_id 走 Session 表(原 uuid4()[:8] 不持久化)
+    v0.3.0-beta: + 挂 2 个 JSX 面板(ContextSettings + MemoryPanel)
     """
     try:
         warmup()
     except Exception as e:
         logger.warning(f"warmup failed: {e}")
+
+    # v0.3.0-beta: 启动时 sweep 一次软删 facts(30 天可恢复窗口过期)
+    # 单用户本地,不需要 APScheduler,每个 chat start 调一次即可
+    try:
+        from yantu.session.cleanup import sweep_soft_deleted_facts
+        swept = sweep_soft_deleted_facts(older_than_days=30)
+        if swept:
+            logger.info(f"startup sweep: cleared {swept} expired soft-deleted facts")
+    except Exception as e:
+        logger.warning(f"startup sweep failed: {e}")
 
     agent = build_agent()
     cl.user_session.set("agent", agent)
@@ -79,6 +91,32 @@ async def start() -> None:
     cl.user_session.set("thread_id", thread_id)
 
     profile = export_markdown()
+    # v0.3.0-beta: 读用户设置 + 记忆列表传给 JSX
+    from yantu.data.user_settings import get_all_settings
+    from yantu.data.models import MemoryFact
+    from sqlalchemy import select
+    from yantu.data.db import session_scope
+    user_settings = get_all_settings()
+    with session_scope() as s:
+        facts_rows = s.execute(
+            select(MemoryFact).where(
+                MemoryFact.user_id == "default",
+                MemoryFact.is_deleted == False,  # noqa: E712
+            )
+        ).scalars().all()
+        facts_for_panel = [
+            {
+                "id": f.id,
+                "fact_type": f.fact_type,
+                "text": f.fact_value.get("text", ""),
+                "subject": f.subject or "",
+                "confidence": f.confidence,
+                "is_deleted": f.is_deleted,
+                "access_count": f.access_count,
+            }
+            for f in facts_rows
+        ]
+
     await cl.Message(
         content=(
             "👋 你好!我是**研途萤火**,你的个人考研助理。\n\n"
@@ -90,6 +128,23 @@ async def start() -> None:
             "- `北京大学 信息公开`\n\n"
             "⚙️ 点右上角 **⚙️ 设置** 打开设置页面(分数/偏好/地区/时间轴),改完自动生效。"
         ),
+        elements=[
+            cl.CustomElement(
+                name="ContextSettings",
+                props={"initial": user_settings},
+                display="inline",
+            ),
+            cl.CustomElement(
+                name="MemoryPanel",
+                props={"initial": facts_for_panel},
+                display="inline",
+            ),
+            cl.CustomElement(
+                name="SessionSidebar",
+                props={"initial": [], "activeId": thread_id},
+                display="side",
+            ),
+        ],
         author="萤火",
     ).send()
 
@@ -191,34 +246,110 @@ async def switch_session_action(action: cl.Action) -> None:
 
 @cl.action_callback("rename_session")
 async def rename_session_action(action: cl.Action) -> None:
-    """v0.3.0: 双击重命名"""
+    """v0.3.0-beta: 双击重命名(SessionSidebar 静默调,不发 message)"""
     payload = action.payload or {}
     tid = payload.get("thread_id")
     new_title = (payload.get("title") or "").strip()
     if not tid or not new_title:
         return
-    if rename_session(tid, new_title):
-        await cl.Message(content=f"✏️ 会话 `{tid}` 已改名为 `{new_title}`").send()
+    rename_session(tid, new_title)  # 静默,JSX 5 秒轮询自动刷新
+
+
+# ==================== v0.3.0-beta 上下文设置 + 记忆管理 action_callback ====================
+
+
+@cl.action_callback("save_context_settings")
+async def save_context_settings_action(action: cl.Action) -> None:
+    """v0.3.0-beta: ContextSettings.jsx 保存滑块值"""
+    from yantu.data.user_settings import update_settings
+    try:
+        payload = action.payload or {}
+        # 只接受 4 个允许的字段(防止前端传恶意 key)
+        allowed = {
+            "context_window_tokens": int,
+            "context_keep_recent_messages": int,
+            "memory_injection_count": int,
+            "memory_enabled": bool,
+        }
+        kwargs = {}
+        for k, typ in allowed.items():
+            if k in payload:
+                kwargs[k] = typ(payload[k])
+        update_settings(**kwargs)
+        logger.info(f"ContextSettings saved: {kwargs}")
+    except Exception as e:
+        logger.exception(f"save_context_settings failed: {e}")
+
+
+@cl.action_callback("delete_memory_fact")
+async def delete_memory_fact_action(action: cl.Action) -> None:
+    """v0.3.0-beta: MemoryPanel 删除单条 fact"""
+    from yantu.data.db import session_scope
+    from sqlalchemy import delete
+    from yantu.data.models import MemoryFact
+    from yantu.data import vector_repo
+    payload = action.payload or {}
+    fid = payload.get("fact_id")
+    if not fid:
+        return
+    try:
+        # Chroma 先删(不可逆放最前)
+        vector_repo.hard_delete_fact(int(fid))
+        # SQLite 删
+        with session_scope() as s:
+            s.execute(delete(MemoryFact).where(MemoryFact.id == int(fid)))
+        logger.info(f"MemoryPanel: deleted fact {fid}")
+    except Exception as e:
+        logger.exception(f"delete_memory_fact failed: {e}")
+
+
+@chainlit_app.get("/api/memories")
+async def api_list_memories():
+    """v0.3.0-beta: MemoryPanel 拉取所有 fact(JSON)"""
+    from yantu.data.db import session_scope
+    from sqlalchemy import select
+    from yantu.data.models import MemoryFact
+    with session_scope() as s:
+        rows = s.execute(
+            select(MemoryFact).where(
+                MemoryFact.user_id == "default",
+                MemoryFact.is_deleted == False,  # noqa: E712
+            )
+        ).scalars().all()
+        return {
+            "memories": [
+                {
+                    "id": f.id,
+                    "fact_type": f.fact_type,
+                    "text": f.fact_value.get("text", ""),
+                    "subject": f.subject or "",
+                    "confidence": f.confidence,
+                    "is_deleted": f.is_deleted,
+                    "access_count": f.access_count,
+                }
+                for f in rows
+            ]
+        }
 
 
 @cl.action_callback("toggle_pin")
 async def toggle_pin_action(action: cl.Action) -> None:
-    """v0.3.0: 固定 / 取消固定"""
+    """v0.3.0-beta: 固定 / 取消固定(SessionSidebar 静默调)"""
     payload = action.payload or {}
     tid = payload.get("thread_id")
     if not tid:
         return
-    pinned = toggle_pin(tid)
-    if pinned is None:
-        await cl.Message(content=f"⚠️ 会话 `{tid}` 不存在").send()
+    toggle_pin(tid)  # 静默,JSX 5 秒轮询自动刷新
 
 
 @cl.action_callback("delete_session")
 async def delete_session_action(action: cl.Action) -> None:
-    """v0.3.0: 删除会话
+    """v0.3.0-beta: 删除会话
 
-    payload.hard = True → 物理删除 + 清 checkpoint
-    默认软删除(archive,checkpoint 保留,可恢复)
+    payload.hard = True → 物理删除 + 清 checkpoint + 释放 memory_facts(3 类处理)
+    payload.hard = False(默认)→ 软删除(archive,checkpoint 保留,可恢复)
+
+    SessionSidebar 静默调,不发 message(5 秒轮询自动刷新列表)
     """
     payload = action.payload or {}
     tid = payload.get("thread_id")
@@ -226,13 +357,10 @@ async def delete_session_action(action: cl.Action) -> None:
     if not tid:
         return
     if hard:
-        ok = hard_delete_session(tid)
-        if ok:
-            await cl.Message(content=f"🗑️ 会话 `{tid}` 已永久删除(含 checkpoint)").send()
+        from yantu.session.cleanup import delete_session_with_memory
+        delete_session_with_memory(tid)  # 静默
     else:
-        ok = archive_session(tid)
-        if ok:
-            await cl.Message(content=f"📦 会话 `{tid}` 已归档(可在 30 天内恢复)").send()
+        archive_session(tid)  # 静默
 
 
 # ==================== 主对话:LangGraph agent 流式 ====================
@@ -250,9 +378,13 @@ async def main(message: cl.Message) -> None:
         "recursion_limit": RECURSION_LIMIT,  # HB-01: 显式上限,防 GraphRecursionError 500
     }
     user_input = message.content
+    # v0.3.0-beta: 检索长期记忆 → 注入 state
+    from yantu.memory.retriever import retrieve_relevant_facts
+    long_term_facts = await retrieve_relevant_facts(user_input)
     inputs = {
         "user_query": user_input,
         "messages": [HumanMessage(content=user_input)],
+        "long_term_facts": long_term_facts,
     }
 
     # 流式处理 — 只处理 tool step,不累积 LLM token
@@ -330,6 +462,42 @@ async def main(message: cl.Message) -> None:
 
     # v0.3.0: 更新 Session 元数据(user + ai 各 1 条)
     touch_session(thread_id, message_count_delta=2)
+
+    # v0.3.0-beta: 异步抽取长期记忆 facts(每 N 轮触发,fire-and-forget)
+    # SPEC R-2 风险:handler 返回后 task 可能被取消 → 用 try/except log warning 兜底
+    if extractor_should_trigger(message_count_delta=2):
+        from yantu.memory.extractor import extract_facts_async
+        current_messages = list(state_values.get("messages", []))
+        if current_messages:
+            asyncio.create_task(
+                _safe_extract(thread_id, current_messages)
+            )
+
+
+async def _safe_extract(thread_id: str, messages: list) -> None:
+    """fire-and-forget 抽取,失败只 log warning 不影响主流程"""
+    from yantu.memory.extractor import extract_facts_async
+    try:
+        ids = await extract_facts_async(thread_id, messages)
+        logger.info(f"extractor fire-and-forget: wrote {len(ids)} facts for {thread_id}")
+    except Exception as e:
+        logger.warning(f"extractor fire-and-forget failed: {e}")
+
+
+def extractor_should_trigger(message_count_delta: int = 2) -> bool:
+    """判断本轮是否触发抽取(每 N 轮)"""
+    from yantu.data.user_settings import get_setting
+    from yantu.session.manager import get_session
+    tid = cl.user_session.get("thread_id")
+    if not tid:
+        return False
+    sess = get_session(tid)
+    if not sess:
+        return False
+    n = int(get_setting("memory_extract_every_n_turns", 3))
+    if n <= 0:
+        return False
+    return (sess.get("message_count", 0) // 2) % n == 0 and sess.get("message_count", 0) > 0
 
 
 # ==================== /settings 独立设置页面(挂在 Chainlit FastAPI app) ====================
