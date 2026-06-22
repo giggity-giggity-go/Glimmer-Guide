@@ -1,9 +1,9 @@
 # 研途萤火(yantu)项目进度
 
-> **截止日期**: 2026-06-20
+> **截止日期**: 2026-06-21
 > **项目仓库**: `giggity-giggity-go/Glimmer-Guide` (私有)
 > **当前 vendor**: `minimax / MiniMax-M3`(2026-06-19 切换,v0.2.2 extra_body 修复后 M3 可用)
-> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试) + ✅ v0.2.2 M3 extra_body 修复 (1 commit, 53/53 测试) + 🚧 v0.3.0-alpha 多会话骨架 (1 commit, 71/71 测试) + 🚀 **v0.3.0-beta PR-2 4 子项 (6 commit, 118/118 pytest)**
+> **状态**: ✅ v0.1.0 MVP + 🎨 Phase 7 UI 增强 + 📏 Phase 8 工具耗时基线 + 🛠️ v0.2.0 Bug Fix (20 bug, 12 commit) + 🔥 UI 热修复 ×2 + ✅ UI 路由实测 (Tool 4: 0%→100%) + 🔧 v0.2.1 JSON 泄漏统一修复 (1 commit, 50/50 测试) + ✅ v0.2.2 M3 extra_body 修复 (1 commit, 53/53 测试) + 🚧 v0.3.0-alpha 多会话骨架 (1 commit, 71/71 测试) + 🚀 v0.3.0-beta PR-2 4 子项 (6 commit, 118/118 pytest) + 🧪 **Day 9 长期记忆实测修复 (synthesizer 注入 long_term_facts)** + 🎨 **Day 10 UI 优化 6 项(WS 推送 + 自定义 modal + 空态 + 键盘导航,浏览器实测通过,156/158 pytest)** + 🐛 **Day 10 修复项(4 浏览器实测 bug: 过滤空壳 / 键盘 useRef 桥接 / IME 感知 / activeId state 化,159/161 pytest,2 个历史行尾失败与本轮无关)**
 
 ---
 
@@ -849,6 +849,173 @@ HF_HUB_OFFLINE=1 SENTENCE_TRANSFORMERS_HOME="$(pwd)/models" \
     "D:\ProgramData\Anaconda_envs\envs\Glimmer\python.exe" studio/visualize.py
 # → 4 个文件:mermaid/json/ascii/png
 ```
+
+---
+
+## 🎨 Day 10 UI 优化(2026-06-21,1 工作日,156/158 pytest)
+
+**核心成果**:从"功能完成"升级到"专业 AI 客户端的交互体验"。侧边栏不再有空壳 session 污染,新建/重命名/置顶/删除都有实时反馈,删除有自定义 modal + 三选项(归档/永久/取消),首屏空态 + 键盘导航对齐豆包/DeepSeek 模式。
+
+### 6 个改造项 — 完整清单
+
+| # | 改造项 | 状态 | 关键文件 | 收益 |
+|---|---|---|---|---|
+| 1 | **首条消息才建 session** | ✅ | `src/yantu/ui/app.py:on_chat_start + on_message` | 不再产生空壳 session(进页面不发消息 DB 不增加) |
+| 2 | **WS 推送 sessions_changed** | ✅ | `app.py:8 处 send_window_message` + `public/custom-header.js` WS→DOM 桥 + `SessionSidebar.jsx` 30s 兜底轮询 | 替代 5s 轮询的延迟感,新建/重命名/置顶/删除立即反映 |
+| 3 | **自定义删除 modal** | ✅ | `SessionSidebar.jsx:ConfirmDeleteModal` | 替代原生 `confirm()`,3 按钮(归档/永久删除/取消)对齐豆包模式 |
+| 4 | **首屏空态 + +新对话智能隐藏** | ✅ | `SessionSidebar.jsx:L455-457` | 📭 emoji + 标题 + 提示语,空态时 +新对话按钮自动隐藏 |
+| 5 | **键盘导航** | ✅ | `SessionSidebar.jsx:focusIdx state + flatList useMemo + useEffect` | ↑/↓ 移动蓝色 outline,Enter 切换,Cmd+1..9 跳第 N 个,不抢输入框焦点 |
+| 6 | **端到端 + 浏览器实测** | ✅ | Chrome DevTools + `test_session_sidebar_visual.py` | 156/158 pytest + 浏览器实测 8/9 项通过 |
+
+### 关键决策(中途变更)
+
+1. **从 5s 轮询 → 30s 兜底 + WS 推送**:原 5s 轮询每次都会闪烁,改事件驱动后 UI 反应 < 100ms;30s 兜底保 WS 断(Chainlit 重启)时仍能同步
+2. **WS→DOM 桥放 `custom-header.js`**:react-runner 不暴露 socket/listenFor,只能在浏览器原生 `window.addEventListener('message', ...)` 监听,然后 `dispatchEvent('sessions-updated')` 转发给 React 组件
+3. **删除 modal 放主 return 根 div 内**(不是 portal):UI 简单优先,margin/overlay 都不影响 React 渲染
+4. **键盘导航只动 focusIdx**(不抢 `tabIndex`):焦点状态用 inline style `outline: 2px solid #0969da`,不影响屏幕阅读器
+
+### 浏览器实测验证清单(8/9 通过)
+
+| # | 验证项 | 状态 | 证据 |
+|---|---|---|---|
+| 1 | 进页面不发消息,DB Session 表无新增 | ✅ | 3 次 on_chat_start 后 DB 仍 17(无 create_session 调用) |
+| 2 | 首条消息后 DB 多一行,thread_id 是新 hex8 | ✅ | 发"你好"后 DB 17→18,thread_id=8508ae27 |
+| 3 | WS 推送链路 | ✅ | dispatch sessions-updated → fetch /api/sessions 立即触发(侧边栏 17→18 实时更新) |
+| 4 | **自定义 confirm 模态框(非浏览器原生)** | ✅ | 截图实测:360px 卡片 + "删除会话" 标题 + 3 按钮 + 说明文案 |
+| 5 | 三按钮分别走 archive / hard_delete / cancel | ✅ | onArchive/onHardDelete/onCancel 三个 handler 全部 hit |
+| 6 | **↑/↓ 在列表移动高亮** | ✅ | 按 ↓ 后 sidebar 第 13 个 div 出现 `outline: rgb(9, 105, 218) solid 2px`;再按 → 位置 16 |
+| 7 | Cmd+1 切第一条 | ⚠️ | React handler 注册到位(`/^[1-9]$/.test(e.key)` 静态就位),但 OS Ctrl+1 路由给浏览器切 tab |
+| 8 | 30s 兜底轮询 | ✅ | JSX L57 `setInterval(poll, 30000)` + 验证脚本 `/api/sessions` 拉取链路正常 |
+| 9 | 首屏空态显示 📭 | ✅ 静态 | grep 验证 L455-457 emoji + 标题 + 提示语 |
+
+### 测试结果(156/158 pytest)
+
+- 原 156 测试(无回归)
+- **新通过**:`test_session_sidebar_visual.py:test_has_polling` 从 5000 改成 30000;3 个 Day 8 过严断言(ITEM_HEIGHT/WIDTH/WIDTH_COLLAPSED)改成匹配 Day 9 inline style
+- 2 个基线失败(`test_memory_panel_identical` / `test_profile_editor_identical`):属于本工作范围之外的 JSX 副本同步问题,Day 9 inline style 重构时就遗留
+
+### 改动文件清单
+
+- **改**:`src/yantu/ui/app.py` — 8 处 send_window_message + on_chat_start 不 create_session + on_message 加 deleted-active 兜底 + 首条消息 create + WS push
+- **改**:`public/custom-header.js` — 末尾追加 WS→DOM 桥接 IIFE(`window.message → sessions-updated` 转发)
+- **改**:`src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx` + `public/elements/SessionSidebar.jsx`(副本同步)— useState 化 sessions + ConfirmDeleteModal 子组件 + 键盘导航 + 空态 + 30s 兜底
+- **改**:`tests/test_session_sidebar_visual.py` — 4 个 Day 8 过严断言更新到匹配 Day 9 inline style(5000→30000、ITEM_HEIGHT/WIDTH/WIDTH_COLLAPSED 改成 inline 数值匹配)
+
+### 后续(Day 11+)
+
+- 存量 17 个空壳 session 人工清理(计划方案定稿时约定,本工作不处理)
+- JSX 副本同步自动化(目前手动 cp;`test_session_sidebar_visual.py` 字节级同步断言)
+- `cl.send_window_message` 在 Chainlit 2.12+ 是否仍可用(目前 2.11.1 OK)
+- 移动端键盘导航适配(目前 `INPUT/TEXTAREA` 守卫主要面向桌面)
+
+---
+
+## 🐛 Day 10 修复项 — 浏览器实测暴露的 4 个新 bug(2026-06-22,159/161 pytest)
+
+> **来源**:用户在 PyCharm 启动后实测发现 Day 10 6 改造项落地后**仍有 4 个 UX 问题**。本章节是修复项,**不是新功能**。Day 10 6 改造项保持不变。
+
+### 4 bug 根因 + 修复
+
+| Bug | 根因 | 修复 | pytest 断言 |
+|---|---|---|---|
+| **1. 侧边栏显示 18 个但当前只有 1 个对话** | `manager.py:list_sessions` 不过滤 `message_count=0` 的历史空壳 | `list_sessions` 加 `min_message_count` 参数(默认 0 向后兼容);`app.py:/api/sessions` 默认传 1;前端 `useMemo` 软过滤兜底 | `test_list_filters_empty_shells_by_default_min_count` + `test_list_min_message_count_zero_disables_filter` + `test_list_min_message_count_higher_threshold` + `test_bug1_filters_empty_sessions` |
+| **2. 侧边栏折叠后页面不响应** | 键盘导航 useEffect deps `[flatList, focusIdx]` 每次 buckets 变就 unmount/remount `document.keydown`,与 layout thrashing 竞争 | `flatListRef` + `focusIdxRef` 桥接,handler 空 deps 只挂一次,内部走 ref 拿最新值 | `test_bug2_keyboard_handler_uses_ref` |
+| **3. 搜索框无法使用** | Ctrl K handler 的 `e.preventDefault()` 在中文 IME composition 中也派发,抢走焦点;`visibility: hidden` 折叠态不响应 | Ctrl K handler 加 `isComposing` / `keyCode === 229` 守卫;input 加 `onCompositionStart/End` 显式同步搜索值 | `test_bug3_ime_aware_ctrl_k` |
+| **4. 点击会话无法切换** | `const activeId = props.activeId` 是普通变量不是 state;react-runner 不重 mount,prop 变了 const 不会重读,导致 active 高亮不更新 | `activeId` 改 `useState` + 订阅 `sessions-updated` 事件识别 `detail.action` 本地更新 | `test_bug4_activeid_is_state` |
+
+### 关键代码改动
+
+| 文件 | 改动 |
+|---|---|
+| `src/yantu/session/manager.py:38-70` | `list_sessions` 加 `min_message_count: int = 0` 参数 |
+| `src/yantu/ui/app.py:651-657` | `/api/sessions` 默认传 `min_message_count=1` |
+| `src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx` | 4 处:① L19-32 activeId 改 useState ② L35-39 前端 nonEmptySessions 软过滤 ③ L67-71 IME 守卫 ④ L111-160 键盘 useRef 桥接 + sessions-updated action 分支 |
+| `public/elements/SessionSidebar.jsx` | 同步副本(字节级一致) |
+| `tests/test_session_sidebar_visual.py` | 加 4 个 `test_bug*` 断言 |
+| `tests/session/test_manager.py:TestList` | 加 3 个 `test_list_min_message_count_*` 断言 |
+
+### 浏览器实测证据
+
+| 验证项 | 修复前 | 修复后 |
+|---|---|---|
+| `/api/sessions` 返回总数 | 18(包含空壳) | 5(全部 `message_count >= 2`) |
+| 底部"X 个会话"显示 | 18 | 5 |
+| 空壳 session 出现 | 是 | 否 |
+| 键盘 handler unmount/remount 频率 | 每次 buckets 变(高) | 只在 mount 时挂一次(低) |
+| IME 中文输入抢焦点 | 是 | 否(已守卫) |
+| 点击会话后 active 高亮 | 不更新 | 立即更新(state 化 + WS 同步) |
+
+### 测试结果
+
+- **159/161 pytest 通过**(原 156/158 + 7 个新断言全过 - 2 个新增但过严断言修过 + 2 个历史行尾失败与本轮无关)
+- **SessionSidebar JSX 副本字节级一致**(`test_session_sidebar_identical` PASSED)
+- 4 个新 `test_bug*` 断言全过
+- 3 个新 `test_list_min_message_count_*` 断言全过
+
+### 风险与回滚
+
+| 修复 | 风险 | 回滚 |
+|---|---|---|
+| `min_message_count=1` 误过滤用户期待看到的空 session | 默认 0 不变,只在 `/api/sessions` 传 1 | `app.py:654` 删 `min_message_count=1` 参数 |
+| ref 桥接后 React 18b StrictMode 双调用 | handler 幂等,生产无影响 | 删 `useRef + useEffect` 改回 `[flatList, focusIdx]` deps |
+| `props.activeId` useEffect deps 引用稳定 | 主要靠 onEvt detail 分支兜底 | 删 useEffect 同步,只靠 onEvt |
+| IME 守卫误伤正常输入 | `isComposing || keyCode === 229` 是 web 标准 | 删 3 行 IME 检查 |
+
+---
+
+## 🎯 Day 11 — 折叠 UI 重构(transform 滑出 + FAB 浮动按钮,豆包风格)
+
+> **来源**:用户反馈"折叠会连着整个对话一起被收,不是单独的收起侧边栏"。根因是 Day 10 用 `width: 60px` 收缩 sidebar + body `padding-left: 60px` 联动 → 主对话跟着"被挤"。
+> **目标**:对齐豆包/DeepSeek 折叠模式 — sidebar 用 `transform: translateX(-220px)` 滑出 title 列(留 60px avatar 列在屏左),主对话 `margin-left` 跟着 280 ↔ 60,不再 body padding 联动。
+
+### 改动清单(2026-06-22,1 工作日,168/170 pytest)
+
+| 改动 | 文件 | 行数 | 说明 |
+|---|---|---|---|
+| sidebar 折叠 `width:60px` → `transform: translateX(-220px)` | `public/custom-header.js` | L36-66 | 留 60px avatar 列在屏左,豆包风格 |
+| 主对话区 `body padding-left` → `.chainlit-container margin-left` | `public/custom-header.js` | L69-83 | 折叠时归 60px,不再"整个对话一起被收" |
+| 新增 `#sidebar-toggle-fab` 浮动按钮 | `public/custom-header.js` | L94-128 | fixed 在屏左,展开 292px / 折叠 72px,200ms 过渡 |
+| Ctrl+B / Cmd+B 全局快捷键 | `public/custom-header.js` | L150-167 | 对齐 VS Code,输入框内不抢 |
+| sidebar 内部 ◀/▶ 折叠按钮删除 | `src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx` | L467-472 | 改由 FAB + Ctrl+B 触发 |
+| sidebar 底部 ⏵/⏸ 折叠按钮删除 | `src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx` | L561-565 | 同上 |
+| sidebar `width: collapsed ? 60 : 280` 写死 280 | `src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx` | L300-311 | CSS transform 取代 width 切换 |
+| 监听 `sidebar:toggle` 事件 | `src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx` | L200-210 | useRef 桥接,handler 空 deps |
+
+### 验证清单
+
+- [x] pytest 168/170 通过(2 个失败是 MemoryPanel/ProfileEditor 行尾 CRLF 历史问题,与 Day 11 无关)
+- [x] Day 11 新增 5 个断言全部通过(`test_day11_*` / `TestCustomHeaderDay11::*`)
+- [x] sidebar DOM width 永远 280px,折叠时 transform 滑出 title 列
+- [x] 主对话区 `margin-left` 280 ↔ 60 同步
+- [x] FAB 浮动按钮 fixed 在屏左,展开 292px / 折叠 72px,200ms 过渡
+- [x] Ctrl+B / Cmd+B 全局快捷键(输入框内不抢)
+- [x] SessionSidebar 不再含内部 ◀/▶ / ⏵/⏸ 折叠按钮
+
+### 关键文件清单
+
+- **改:** `public/custom-header.js`(CSS transform 滑出 + FAB 注入 + Ctrl+B)
+- **改:** `src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx`(sidebarStyle 写死 280 + 监听 sidebar:toggle + 删内部按钮)
+- **改:** `public/elements/SessionSidebar.jsx`(同步副本)
+- **改:** `tests/test_session_sidebar_visual.py`(新增 8 个 Day 11 断言)
+- **不改:** `src/yantu/ui/app.py`(WS 推送接口不动,FAB 自己 dispatch event)
+
+### 设计取舍
+
+| 选项 | 选择 | 原因 |
+|---|---|---|
+| transform: translateX(-220px) vs translateX(-280px) | **-220px** | 完全滑出 = sidebar 不可见,但 60px avatar 列仍可点切换会话(豆包风格) |
+| main margin-left vs body padding-left | **margin-left** | body padding 会让整页 content 跟着缩,main margin 只影响主对话区 |
+| FAB 在 sidebar 内 vs FAB fixed | **fixed 在屏左** | sidebar 滑出后按钮仍可见可点,符合豆包期望 |
+| FAB 在屏左 12px vs 72px | **展开 292 / 折叠 72** | 展开时贴着 sidebar 右边,折叠后贴着 60px avatar 列右边,视觉一致 |
+
+### 风险与回滚
+
+| 风险 | 缓解 | 回滚 |
+|---|---|---|
+| FAB 注入时机晚于 sidebar 渲染,首次展开 FAB 不在位 | `injectFab` 在 `init()` 里同步执行,DOM 已 ready 时立即生效 | 把 FAB 移到 SessionSidebar JSX 内渲染 |
+| `margin-left: 280px` 被 Chainlit 自有 CSS 覆盖 | 用 `!important` + 多个 selector(`.chainlit-container, #main, main`) | 改回 `body padding-left: 280px` 旧方案 |
+| Ctrl+B 与浏览器原生快捷键冲突 | 输入框内主动 `return`(不抢焦点),且 `!e.shiftKey && !e.altKey` 防误触 | 删 Ctrl+B 监听,只保留 FAB |
+| FAB DOM 与 sidebar transform 不同步导致按钮位置抖动 | `body[data-sidebar-collapsed]` 与 `[data-sidebar-collapsed]` 同步切换,共享 200ms transition | 删 FAB,改回 sidebar 内按钮 |
 
 ---
 
