@@ -1017,6 +1017,27 @@ HF_HUB_OFFLINE=1 SENTENCE_TRANSFORMERS_HOME="$(pwd)/models" \
 | Ctrl+B 与浏览器原生快捷键冲突 | 输入框内主动 `return`(不抢焦点),且 `!e.shiftKey && !e.altKey` 防误触 | 删 Ctrl+B 监听,只保留 FAB |
 | FAB DOM 与 sidebar transform 不同步导致按钮位置抖动 | `body[data-sidebar-collapsed]` 与 `[data-sidebar-collapsed]` 同步切换,共享 200ms transition | 删 FAB,改回 sidebar 内按钮 |
 
+### 🐛 Day 11 hotfix — CSS selector 误匹配 body(FAB 被拖屏外)
+
+> **来源**:用户重启服务后实测发现 — 折叠 FAB 无法点击(`Failed to interact with the element`),且 Chainlit 默认 UI 元素位置错乱(疑似与自定义 sidebar 重叠)
+
+**根因**:
+- SessionSidebar React state 切换时给 `document.body` 也设了 `data-sidebar-collapsed="1"`(沿用 Day 10 同步逻辑)
+- custom-header.js CSS selector `[data-sidebar-collapsed="1"]` 无差别匹配任何带这个 attribute 的元素,**包括 body**
+- body 被 `transform: translateX(-220px)` 整体偏移 → FAB 作为 body 子元素跟着跑到屏外(`rect.x = -148px`)
+- 真实 click 永远打不到 FAB(报错 `The element did not become interactive`)
+- Chainlit 默认 UI 元素(虽然被 hidden)位置也被 body transform 错位 → 视觉上"重叠"
+
+**修复**:
+- `[data-sidebar-collapsed="1"]` → `[data-sidebar="1"][data-sidebar-collapsed="1"]`(限定 sidebar 自己)
+- 加 `test_day11_transform_selector_scoped_to_sidebar` 防回归(解析 CSS rule,验证含 transform 的 selector 必须同时限定 `[data-sidebar="1"]`)
+
+**验证**:
+- body `transform: -220px` → `none`
+- FAB `rect.x = -148` → `292`(展开)/ `72`(折叠)
+- 真实 click FAB 成功触发折叠/展开
+- pytest 6/6 Day 11 断言全过(含新防回归断言)
+
 ---
 
 ## 📌 Git 状态

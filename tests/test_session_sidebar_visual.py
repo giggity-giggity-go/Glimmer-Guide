@@ -273,6 +273,22 @@ class TestCustomHeaderDay11:
         # 老 width 60px 反模式不应在 CSS 里出现
         assert "width: 60px" not in css_only, "不应再硬编码 width: 60px"
 
+    def test_day11_transform_selector_scoped_to_sidebar(self):
+        """Day 11 修复:CSS transform selector 必须限定 [data-sidebar="1"][data-sidebar-collapsed="1"]
+        否则 body / 其他元素也会被 transform 拖走,FAB 等 fixed 子元素跟着跑屏外,真实 click 打不到"""
+        import re
+        # 解析每条 CSS rule:selector { properties }
+        for m in re.finditer(r"'([^']+)'\s*:\s*\{([^}]+)\}", self.src):
+            selector = m.group(1)
+            properties = m.group(2)
+            if "transform" not in properties:
+                continue
+            # 用了 collapsed 选择器的 transform rule 必须同时限定 sidebar
+            collapsed_marker = '[data-sidebar-collapsed="1"]'
+            if collapsed_marker in selector:
+                assert '[data-sidebar="1"]' in selector, \
+                    f"transform rule selector 未限定 sidebar: {selector} → 会误匹配 body 导致 FAB 等被拖走"
+
     def test_day11_fab_button_exists(self):
         """Day 11:#sidebar-toggle-fab 浮动按钮注入"""
         assert "#sidebar-toggle-fab" in self.src, "未注入 #sidebar-toggle-fab"

@@ -42,7 +42,9 @@
       // 3. 折叠态:transform 滑出 title 列(留 60px avatar 列在屏左)
       //    原 width: 60px 切会让 layout 重新计算导致抖动
       //    改 transform 后 sidebar DOM 不动,只是视觉滑出 220px(=280-60)
-      '[data-sidebar-collapsed="1"] {',
+      //    Day 11 修:selector 加 [data-sidebar="1"] 限定,避免 body / 其他元素被误匹配
+      //    (body 也有 data-sidebar-collapsed,旧 selector 会把整个 body 偏移 -220px → FAB 也被拖到屏外)
+      '[data-sidebar="1"][data-sidebar-collapsed="1"] {',
       '  transform: translateX(-220px) !important;',
       '}',
       // 4. 主对话区右移 280px(避免被 sidebar 覆盖)— Day 11 改用 margin-left
