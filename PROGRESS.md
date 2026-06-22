@@ -1038,6 +1038,26 @@ HF_HUB_OFFLINE=1 SENTENCE_TRANSFORMERS_HOME="$(pwd)/models" \
 - 真实 click FAB 成功触发折叠/展开
 - pytest 6/6 Day 11 断言全过(含新防回归断言)
 
+### 🐛 Day 11 hotfix 2 — body class 替代 attribute,根因彻底消除
+
+> **来源**:第一次 hotfix (c83a5ee) 只加了 CSS selector 前缀,但根因未消除 — SessionSidebar 仍在给 body 设 attribute,未来任何新 CSS rule 用这个 attribute 都会再次误匹配 body
+
+**修复方案**:
+- SessionSidebar: `setAttribute('data-sidebar-collapsed', '1')` → `classList.toggle('sidebar-collapsed', collapsed)`
+- custom-header.js CSS 5 处:`body[data-sidebar-collapsed="1"]` → `body.sidebar-collapsed`
+- custom-header.js JS:MutationObserver `attributeFilter: ['data-sidebar-collapsed']` → `['class']`
+- `syncBodyPadding()` 改为检测 sidebar attr + body class 双向兜底
+
+**为什么 class 比 attribute 安全**:
+- CSS `[attr]` 选择器无差别匹配任何带 attribute 的元素(body 也被匹配 → 整页偏移)
+- CSS `.class` 选择器只匹配**显式**有那个 class 的元素
+- `classList.toggle()` 是 boolean 操作,不会误设错元素
+
+**测试**:
+- `test_hotfix2_no_body_setattribute_collapsed`: SessionSidebar 不再 setAttribute data-sidebar-collapsed
+- `test_day11_hotfix2_uses_class_not_body_attribute`: CSS 改用 body.sidebar-collapsed class selector
+- pytest 36/38 通过(2 个历史 CRLF 行尾失败与本轮无关)
+
 ---
 
 ## 📌 Git 状态
