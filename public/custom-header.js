@@ -50,13 +50,15 @@
       // 4. 主对话区右移 280px(避免被 sidebar 覆盖)— Day 11 改用 margin-left
       //    之前用 body padding-left,导致折叠时整个页面 content 跟着移动
       //    现在 main 元素用 margin-left 留位置,折叠时归 60(对齐 avatar 列)
+      //    Day 11 hotfix 2:用 body.sidebar-collapsed class 替代 body[data-sidebar-collapsed] attribute
+      //    class 不会被 CSS [attr] selector 误匹配(避免再次 body 被 transform 拖走)
       '.chainlit-container, #main, main, [class*="MuiBox-root"]:has(> [class*="Step"]) {',
       '  margin-left: 280px !important;',
       '  transition: margin-left 200ms ease !important;',
       '}',
-      'body[data-sidebar-collapsed="1"] .chainlit-container,',
-      'body[data-sidebar-collapsed="1"] #main,',
-      'body[data-sidebar-collapsed="1"] main {',
+      'body.sidebar-collapsed .chainlit-container,',
+      'body.sidebar-collapsed #main,',
+      'body.sidebar-collapsed main {',
       '  margin-left: 60px !important;',
       '}',
       // 5. Settings 弹层 / Header 按钮保持在 sidebar 上方(z-index > 50)
@@ -88,7 +90,8 @@
       '}',
       '#sidebar-toggle-fab:hover { background: #f6f8fa !important; }',
       // 折叠后按钮移到 60px sidebar 右边
-      'body[data-sidebar-collapsed="1"] #sidebar-toggle-fab {',
+      // Day 11 hotfix 2: 用 body.sidebar-collapsed class
+      'body.sidebar-collapsed #sidebar-toggle-fab {',
       '  left: 72px !important;',  // 60(avatar 列宽)+ 12 gap
       '}',
       // 折叠态按钮的 icon 旋转(☰ → ✕)
@@ -112,28 +115,30 @@
     btn.addEventListener('click', function () {
       window.dispatchEvent(new CustomEvent('sidebar:toggle'));
     });
-    // 同步按钮状态(根据 body data-sidebar-collapsed 旋转 icon)
+    // 同步按钮状态(Day 11 hotfix 2:用 body.sidebar-collapsed class 而非 attribute)
     var syncFabState = function () {
-      var collapsed = document.body.getAttribute('data-sidebar-collapsed') === '1';
+      var collapsed = document.body.classList.contains('sidebar-collapsed');
       btn.setAttribute('data-collapsed', collapsed ? '1' : '0');
       btn.textContent = collapsed ? '✕' : '☰';
     };
     syncFabState();
-    // 监听 body attribute 变化(1000ms 轮询会触发)
+    // 监听 body class 变化(1000ms 轮询会触发)
     var observer = new MutationObserver(syncFabState);
-    observer.observe(document.body, { attributes: true, attributeFilter: ['data-sidebar-collapsed'] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
     btn._observer = observer;
     document.body.appendChild(btn);
   }
 
   function syncBodyPadding() {
-    // 旧 API 保留:1000ms 轮询调一次,确保 React 改的 data attr 同步给 body
-    var collapsed = document.querySelector('[data-sidebar-collapsed="1"]');
-    var current = document.body.getAttribute('data-sidebar-collapsed');
-    if (collapsed && current !== '1') {
-      document.body.setAttribute('data-sidebar-collapsed', '1');
-    } else if (!collapsed && current !== null) {
-      document.body.removeAttribute('data-sidebar-collapsed');
+    // Day 11 hotfix 2: 不再需要双向同步 collapsed state
+    // SessionSidebar 改用 document.body.classList.toggle('sidebar-collapsed', collapsed)
+    // 直接设 class,这里只做兜底检查(防御 React state 被外部 reset)
+    var sidebarCollapsed = document.querySelector('[data-sidebar="1"][data-sidebar-collapsed="1"]') !== null;
+    var bodyHasClass = document.body.classList.contains('sidebar-collapsed');
+    if (sidebarCollapsed && !bodyHasClass) {
+      document.body.classList.add('sidebar-collapsed');
+    } else if (!sidebarCollapsed && bodyHasClass) {
+      document.body.classList.remove('sidebar-collapsed');
     }
   }
 

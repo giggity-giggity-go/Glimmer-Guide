@@ -226,6 +226,28 @@ class TestSessionSidebarContent:
         assert '"sidebar:toggle"' in self.src, "未监听 sidebar:toggle 事件"
         assert "addEventListener(\"sidebar:toggle\"" in self.src, "未挂 sidebar:toggle listener"
 
+    # ===== v0.3.0 Day 11 hotfix 2:用 classList 替代 body attribute =====
+
+    def test_hotfix2_no_body_setattribute_collapsed(self):
+        """Day 11 hotfix 2:SessionSidebar 不应再给 body 设 data-sidebar-collapsed attribute
+        改用 classList.toggle('sidebar-collapsed') — class 不会被 CSS [attr] selector 误匹配"""
+        # 去 JSX 注释
+        import re
+        no_jsx_comments = re.sub(r"\{/\*.*?\*/\}", "", self.src, flags=re.DOTALL)
+        code_only = "\n".join(
+            line for line in no_jsx_comments.split("\n")
+            if not line.strip().startswith("//")
+        )
+        # 不应再调 body.setAttribute('data-sidebar-collapsed', ...)
+        assert "body.setAttribute(\"data-sidebar-collapsed\"" not in code_only, \
+            "SessionSidebar 不应再 setAttribute data-sidebar-collapsed,改用 classList"
+        # 应调 classList.toggle('sidebar-collapsed')
+        assert "classList.toggle(\"sidebar-collapsed\"" in code_only or "classList.toggle('sidebar-collapsed'" in code_only, \
+            "SessionSidebar 应调 classList.toggle('sidebar-collapsed', collapsed)"
+        # 不应再 removeAttribute data-sidebar-collapsed
+        assert "body.removeAttribute(\"data-sidebar-collapsed\"" not in code_only, \
+            "SessionSidebar 不应再 removeAttribute data-sidebar-collapsed"
+
 
 # ==================== 4. 5 个 callAction action_callback 存在 ====================
 
@@ -288,6 +310,27 @@ class TestCustomHeaderDay11:
             if collapsed_marker in selector:
                 assert '[data-sidebar="1"]' in selector, \
                     f"transform rule selector 未限定 sidebar: {selector} → 会误匹配 body 导致 FAB 等被拖走"
+
+    def test_day11_hotfix2_uses_class_not_body_attribute(self):
+        """Day 11 hotfix 2:CSS 折叠态 selector 应改用 body.sidebar-collapsed class
+        而非 body[data-sidebar-collapsed="1"] attribute(避免误匹配风险)"""
+        # 解析每条 CSS rule
+        import re
+        css_rules = list(re.finditer(r"'([^']+)'\s*:\s*\{([^}]+)\}", self.src))
+        # 旧的 body[data-sidebar-collapsed="1"] selector 应不再出现在 CSS 里
+        # (main / FAB 等用 main content 定位的 selector 应改用 class)
+        for m in css_rules:
+            selector = m.group(1)
+            # 这些 selector 用的是 [data-sidebar-collapsed="1"] + body 前缀,应改 class
+            if selector.startswith("body[data-sidebar-collapsed="):
+                # 唯一例外:已经限定 [data-sidebar="1"] 的不算
+                if '[data-sidebar="1"]' not in selector:
+                    raise AssertionError(
+                        f"CSS selector {selector} 仍用 body[attr] 形式,应改用 body.sidebar-collapsed class"
+                    )
+        # 正确写法: body.sidebar-collapsed class selector 应该存在
+        assert "body.sidebar-collapsed" in self.src, \
+            "应使用 body.sidebar-collapsed class 选择器(替代 body[data-sidebar-collapsed])"
 
     def test_day11_fab_button_exists(self):
         """Day 11:#sidebar-toggle-fab 浮动按钮注入"""

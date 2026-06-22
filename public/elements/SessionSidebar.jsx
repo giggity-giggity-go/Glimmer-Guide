@@ -183,16 +183,13 @@ export default function SessionSidebar() {
     return () => document.removeEventListener("keydown", handler);
   }, []);  // 修:空 deps,handler 永远只挂一次,内部走 ref 拿最新值
 
-  // === 折叠态 同步到 body 标签(让 custom-header.js 切换 main margin-left) ===
-  // Day 11 改:同时同步 data-sidebar-collapsed 到 sidebar 自己的 div
-  // (之前只设 body 属性,现在 CSS 选择器 [data-sidebar-collapsed="1"] 改为匹配 sidebar 自身,
-  //  让 custom-header.js 的 transform: translateX(-280px) 生效)
+  // === 折叠态 同步到 body class(让 custom-header.js 切换 main margin-left) ===
+  // v0.3.0 Day 11 hotfix 2 改:从 data-sidebar-collapsed attribute 改用 sidebar-collapsed class
+  // 原因:之前用 attribute 时,body 被设了 data-sidebar-collapsed,
+  // CSS selector [data-sidebar-collapsed="1"] 无差别匹配会误把 body 也 transform 偏移 → FAB 被拖走
+  // 改用 class 后,className 不会被 CSS [attr] selector 误匹配,只通过显式 .sidebar-collached class 选择器匹配
   useEffect(() => {
-    if (collapsed) {
-      document.body.setAttribute("data-sidebar-collapsed", "1");
-    } else {
-      document.body.removeAttribute("data-sidebar-collapsed");
-    }
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
   }, [collapsed]);
 
   // === Day 11 新增:监听 custom-header.js 注入的 FAB 点击 + Ctrl+B ===
