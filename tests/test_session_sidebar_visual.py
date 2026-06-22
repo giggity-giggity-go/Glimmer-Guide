@@ -332,6 +332,24 @@ class TestCustomHeaderDay11:
         assert "body.sidebar-collapsed" in self.src, \
             "应使用 body.sidebar-collapsed class 选择器(替代 body[data-sidebar-collapsed])"
 
+    def test_day11_hotfix3_fab_zindex_above_header(self):
+        """Day 11 hotfix 3:FAB z-index 必须 > #header z-index(100)
+        否则 Chainlit header 拦截 click → 'Failed to interact with the element'"""
+        import re
+        # 找 #sidebar-toggle-fab 主 rule 的 z-index(写法: '#sidebar-toggle-fab {' 后跟属性)
+        # 先找到 rule 起点
+        fab_rule_start = self.src.find("'#sidebar-toggle-fab {'")
+        assert fab_rule_start >= 0, "未找到 #sidebar-toggle-fab 主 CSS rule"
+        # 找 { 后的内容到下一个 }
+        brace_open = self.src.find("{", fab_rule_start)
+        brace_close = self.src.find("}", brace_open)
+        properties = self.src[brace_open + 1:brace_close]
+        # 提取 z-index 数值
+        z_match = re.search(r'z-index:\s*(\d+)', properties)
+        assert z_match, f"FAB 必须显式设 z-index,properties={properties}"
+        fab_z = int(z_match.group(1))
+        assert fab_z > 100, f"FAB z-index({fab_z}) 必须 > 100(#header z-index),否则 header 拦截 click"
+
     def test_day11_fab_button_exists(self):
         """Day 11:#sidebar-toggle-fab 浮动按钮注入"""
         assert "#sidebar-toggle-fab" in self.src, "未注入 #sidebar-toggle-fab"

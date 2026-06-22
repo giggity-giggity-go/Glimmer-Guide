@@ -71,7 +71,7 @@
       '  position: fixed !important;',
       '  left: 292px !important;',
       '  top: 12px !important;',
-      '  z-index: 60 !important;',
+      '  z-index: 150 !important;',  // Day 11 hotfix 3:必须 > #header z-index(100),否则 header 拦截 click
       '  width: 32px !important;',
       '  height: 32px !important;',
       '  border-radius: 8px !important;',

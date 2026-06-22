@@ -1058,6 +1058,30 @@ HF_HUB_OFFLINE=1 SENTENCE_TRANSFORMERS_HOME="$(pwd)/models" \
 - `test_day11_hotfix2_uses_class_not_body_attribute`: CSS 改用 body.sidebar-collapsed class selector
 - pytest 36/38 通过(2 个历史 CRLF 行尾失败与本轮无关)
 
+### 🐛 Day 11 hotfix 3 — FAB z-index 必须 > #header z-index(否则 header 拦截 click)
+
+> **来源**:用户重启服务实测 + Playwright 验证 — body 不再被 transform,FAB rect.x 也正确,但**真实 mouse click 仍失败**(Playwright 报 `<div id="header"> intercepts pointer events`)
+
+**根因**:
+- Chainlit 的 `#header` `z-index: 100`,width **1036px**(覆盖整个顶部)
+- FAB 之前 `z-index: 60`(< header)
+- FAB 位置 `(292, 12) → (324, 44)` 完全在 header 区域内
+- `document.elementsFromPoint(308, 28)` 顶层元素是 `#header`,真实 click 永远命中 header
+- FAB 收不到 click 事件 → React state 不变 → 体感"无法折叠"
+
+**修复**:
+- FAB `z-index: 60` → `150`(> header 100,但 < Chainlit modal 200)
+- 加 `test_day11_hotfix3_fab_zindex_above_header` 防回归
+
+**验证(Playwright 真实 mouse click)**:
+- 折叠前:body class `""`,sidebar transform `(0,0)`,FAB `left: 292`,icon `☰`
+- **真实 click FAB**:body class → `"sidebar-collapsed"`,sidebar transform → `-220`,FAB `left: 72`,icon `✕`
+- 再次 click:全部归位
+- pytest 8/8 Day 11 + hotfix 断言全过
+
+**关键教训**:
+> z-index 不只是"显示层级",也决定 click 事件路由。FAB 视觉上在 sidebar 右边,但 DOM 层面被 header 覆盖,真实 click 永远走 header → React 不响应。
+
 ---
 
 ## 📌 Git 状态
