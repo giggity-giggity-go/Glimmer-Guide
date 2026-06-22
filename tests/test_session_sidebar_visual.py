@@ -226,6 +226,23 @@ class TestSessionSidebarContent:
         assert '"sidebar:toggle"' in self.src, "未监听 sidebar:toggle 事件"
         assert "addEventListener(\"sidebar:toggle\"" in self.src, "未挂 sidebar:toggle listener"
 
+    # ===== v0.3.0 Day 12 D3: history 同步 =====
+
+    def test_day12_d3_listens_history_change(self):
+        """Day 12 D3:SessionSidebar 监听 popstate + 拦截 pushState/replaceState 同步 activeId
+        防止浏览器后退/前进或外部链接直接打开 /thread/xxx 时,activeId 不跟随"""
+        # 监听 popstate
+        assert "addEventListener(\"popstate\"" in self.src, "未监听 popstate"
+        # 拦截 pushState
+        assert "history.pushState" in self.src, "未拦截 history.pushState"
+        # 拦截 replaceState
+        assert "history.replaceState" in self.src, "未拦截 history.replaceState"
+        # 从 pathname 解析 thread id
+        assert "/thread/" in self.src, "未从 URL 解析 thread id"
+        # cleanup 必须恢复 orig pushState / replaceState(防内存泄漏)
+        assert "origPush" in self.src, "未保留 origPush 引用"
+        assert "origReplace" in self.src, "未保留 origReplace 引用"
+
     # ===== v0.3.0 Day 11 hotfix 2:用 classList 替代 body attribute =====
 
     def test_hotfix2_no_body_setattribute_collapsed(self):

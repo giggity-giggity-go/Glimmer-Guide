@@ -30,6 +30,37 @@ export default function SessionSidebar() {
     const newId = (props && props.activeId) || "";
     if (newId) setActiveId(newId);
   }, [props && props.activeId]);
+  // v0.3.0 Day 12 D3:监听 URL pathname 变化同步 activeId
+  // 背景:Chainlit 切会话通过 window.location.pathname = /thread/${id} 触发 Recoil SessionId atom
+  // 我们的 SessionSidebar 是 react-runner 独立渲染,不在 Chainlit React 树里
+  // 必须自己监听 history 变化(浏览器后退/前进 / 外部链接直接打开)
+  useEffect(() => {
+    var syncFromLocation = function () {
+      var match = window.location.pathname.match(/^\/thread\/([^/]+)/);
+      setActiveId(match ? match[1] : "");
+    };
+    syncFromLocation();  // 初始化时跑一次
+    window.addEventListener("popstate", syncFromLocation);
+    // Chainlit 内部 pushState / replaceState 不会触发 popstate
+    // 必须拦截 history API 主动同步
+    var origPush = history.pushState;
+    var origReplace = history.replaceState;
+    history.pushState = function () {
+      var ret = origPush.apply(this, arguments);
+      syncFromLocation();
+      return ret;
+    };
+    history.replaceState = function () {
+      var ret = origReplace.apply(this, arguments);
+      syncFromLocation();
+      return ret;
+    };
+    return function () {
+      window.removeEventListener("popstate", syncFromLocation);
+      history.pushState = origPush;
+      history.replaceState = origReplace;
+    };
+  }, []);
   // v0.3.0 Day 10: sessions 走 useState,初始值用 prop.initial
   // 后续由 WS push / 轮询更新(之前直接 const sessions = initial 是 React 反模式)
   const [sessions, setSessions] = useState(initial);

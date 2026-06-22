@@ -1084,6 +1084,66 @@ HF_HUB_OFFLINE=1 SENTENCE_TRANSFORMERS_HOME="$(pwd)/models" \
 
 ---
 
+## 🎯 Day 12 D3 — 完全接管 Chainlit Chat History Sidebar
+
+> **来源**:用户在 Day 11 hotfix 3 收尾后,问"Chainlit 新建会话按钮如何处理",经 Phase 1 调研 Chainlit frontend 后,确认 Chainlit 2.11.1 的 `default_sidebar_state="hidden"` 是最干净的 hack 入口 — **hidden → Chainlit sidebar DOM 完全不挂载**,SessionSidebar 独占左侧栏,根本不存在重叠风险。
+
+### 调研结论(Phase 1)
+
+Chainlit frontend `index-LFVFt-Wr.js:9206` 用三元判断:
+```js
+c = (e?.ui?.default_sidebar_state) === "hidden"
+return s && !c ? (
+  <Fragment>
+    <YVn/>          // ← Sidebar DOM
+    <Zet>{o}</Zet>
+  </Fragment>
+) : (
+  <div className="h-screen w-screen flex">{o}</div>
+)
+```
+
+- `hidden` → `c=true` → `<YVn/>` **不挂载**
+- `closed` → DOM 还在 + 用户可点汉堡按钮展开 → 两个 sidebar 同时存在
+- `open`(默认) → 渲染且展开
+
+**关键发现**:`default_sidebar_state="hidden"` 在 Day 8 就已配置(根目录 `.chainlit/config.toml`),无需重新设置。
+
+### 改动清单(2026-06-22,1 工作日,173/175 pytest)
+
+| 改动 | 文件 | 说明 |
+|---|---|---|
+| 启动 warning(防御 config 误改) | `src/yantu/ui/app.py:715-728` | `chainlit_config.ui.default_sidebar_state != "hidden"` 时打 warning 提示 |
+| 删 Ctrl+B 死代码 | `public/custom-header.js:170-176` | FAB click 已能正常触发折叠,Ctrl+B 冗余删 |
+| SessionSidebar 加 history 同步 | `src/yantu/ui/.chainlit/public/elements/SessionSidebar.jsx` | 监听 popstate + 拦截 pushState/replaceState 同步 activeId,防浏览器后退/外部链接切会话时 activeId 不跟随 |
+| pytest 防回归断言 | `tests/test_session_sidebar_visual.py:test_day12_d3_listens_history_change` | 验证 popstate + pushState + replaceState + /thread/ 解析 + origPush 保留 |
+
+### 验证
+
+- pytest **173/175 通过**(2 个历史 CRLF 行尾失败与本轮无关)
+- Playwright 实测:`document.querySelector('[data-sidebar="sidebar"]')` 为 null — **Chainlit 原生 sidebar DOM 不再挂载**
+- `history.pushState({}, '', '/thread/abc123')` 触发后,SessionSidebar React state 通过 `syncFromLocation` 同步 activeId
+
+### 风险与回滚
+
+| 风险 | 缓解 | 回滚 |
+|---|---|---|
+| Chainlit 2.12 改 `default_sidebar_state` 语义 | 升级后第一时间 grep `index-*.js` 验证 | 把 `default_sidebar_state` 改回 `"open"` |
+| 启动 warning 噪音(开发时常见) | 用 warning 而非 assert,服务不崩 | 删 app.py:715-728 块 |
+| history.pushState 拦截副作用 | 严格保存 origPush/origReplace,cleanup 恢复 | 删 SessionSidebar L34-62 useEffect |
+| `data-sidebar="1"` selector 与 Chainlit shadcn `data-sidebar="sidebar"` 冲突 | 我们 selector 只匹配属性值"1",Chainlit 用"sidebar",不冲突 | 无需回滚 |
+
+### Chainlit 升级 checklist(写给未来)
+
+1. 升级 chainlit 到 2.12+
+2. 启动 dev 服务器
+3. 浏览器打开 → 是否只有一个 sidebar(我们的)
+4. `grep "default_sidebar_state" $(python -c 'import chainlit, os; print(os.path.dirname(chainlit.__file__))')/frontend/dist/assets/index-*.js` 确认三元判断
+5. 跑 `pytest tests/test_session_sidebar_visual.py` 全过
+6. Playwright 验证 history sync(浏览器后退)
+
+---
+
 ## 📌 Git 状态
 
 ```

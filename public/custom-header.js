@@ -170,18 +170,7 @@
     });
   })();
 
-  // Day 11 新增:Ctrl+B / Cmd+B 全局快捷键(对齐 VS Code)
-  document.addEventListener('keydown', function (e) {
-    var k = (e.key || '').toLowerCase();
-    var modKey = e.ctrlKey || e.metaKey;
-    if (!modKey) return;
-    if (e.isComposing || e.keyCode === 229) return;
-    if (k === 'b' && !e.shiftKey && !e.altKey) {
-      var tag = (document.activeElement && document.activeElement.tagName) || '';
-      // 输入框里不抢(允许正常 Ctrl+B 文字编辑)
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      e.preventDefault();
-      window.dispatchEvent(new CustomEvent('sidebar:toggle'));
-    }
-  });
+  // Day 12 D3 删:Ctrl+B / Cmd+B 全局快捷键(对齐 VS Code)
+  // 原因:Day 11 hotfix 3 后,FAB click 已经能正常触发折叠/展开,Ctrl+B 冗余
+  // SessionSidebar 内部可加自己的快捷键监听(避免全局副作用)
 })();
